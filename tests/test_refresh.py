@@ -98,3 +98,45 @@ def test_http_rate_limit_sets_retry_backoff(monkeypatch, tmp_path: Path) -> None
     assert snapshot["rate_limited"] is True
     assert snapshot["sessions"][0]["repos"][0]["error"]["kind"] == "rate_limited"
     assert refresh._state["backoff_until"] > 0
+
+
+def test_http_failure_without_cached_issue_data_does_not_mark_snapshot_stale(monkeypatch, tmp_path: Path) -> None:
+    _checkout(tmp_path, "feature/unlinked")
+    previous = {
+        "sessions": [
+            {
+                "session_id": "s1",
+                "issues": [],
+                "repos": [{"path": str(tmp_path), "branch": "feature/unlinked", "issues": []}],
+            }
+        ]
+    }
+    monkeypatch.setattr(refresh, "_state", {"snapshot": previous, "backoff_until": 0.0})
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(tmp_path)}],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(lambda _: httpx.Response(503)),
+    )
+
+    session = snapshot["sessions"][0]
+    assert session.get("stale") is None
+    assert session["repos"][0]["error"]["kind"] == "network"
+
+
+def test_rate_limit_without_cached_issue_data_does_not_mark_snapshot_stale(monkeypatch, tmp_path: Path) -> None:
+    previous = {
+        "sessions": [
+            {
+                "session_id": "s1",
+                "issues": [],
+                "repos": [{"path": str(tmp_path), "branch": "feature/unlinked", "issues": []}],
+            }
+        ]
+    }
+    monkeypatch.setattr(refresh, "_state", {"snapshot": previous, "backoff_until": 9999999999.0})
+
+    snapshot = refresh.build_snapshot([{"id": "s1", "project_path": str(tmp_path)}], env={})
+
+    assert snapshot["sessions"][0].get("stale") is None
+    assert snapshot["rate_limited"] is True

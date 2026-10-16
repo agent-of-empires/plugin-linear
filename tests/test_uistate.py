@@ -91,3 +91,21 @@ def test_stale_cache_is_visible_in_row_and_pane() -> None:
     assert by_slot[ROW_BADGE_SLOT[0]]["items"][-1]["text"] == "stale"
     assert by_slot[ROW_COLUMN_SLOT[0]]["tone"] == "warn"
     assert by_slot[PANE_SLOT[0]]["blocks"][0]["tone"] == "warn"
+
+
+def test_empty_stale_error_does_not_claim_cached_data() -> None:
+    snapshot = {
+        "sessions": [
+            {
+                "session_id": "s1",
+                "issues": [],
+                "repos": [{"error": {"hint": "Linear GraphQL error"}}],
+                "stale": True,
+            }
+        ]
+    }
+    payloads = session_payloads(snapshot)
+    by_slot = {item["slot"]: item["payload"] for item in payloads if item.get("session_id") == "s1"}
+
+    assert [item["text"] for item in by_slot[ROW_BADGE_SLOT[0]]["items"]] == ["Linear error"]
+    assert [block.get("title") for block in by_slot[PANE_SLOT[0]]["blocks"]] == ["Linear unavailable"]

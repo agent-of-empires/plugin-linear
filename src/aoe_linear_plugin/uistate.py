@@ -126,7 +126,7 @@ def _pane(session: dict[str, Any], selected: str | None, *, show_priority: bool)
     issues = _sort_issues(session.get("issues", []))
     chosen = _selected(issues, selected)
     blocks: list[dict[str, Any]] = []
-    if session.get("stale"):
+    if session.get("stale") and issues:
         blocks.append(
             {
                 "kind": "note",
@@ -240,7 +240,7 @@ def _session_ui(
             hint = error.get("hint", "Linear request failed")
             badge_items.append({"text": "Linear error", "tone": "danger", "tooltip": hint})
             column = {"text": "Linear unavailable", "tone": "danger", "tooltip": hint, "sort_value": 98}
-    if session.get("stale"):
+    if session.get("stale") and issues:
         badge_items.append({"text": "stale", "tone": "warn", "tooltip": "Showing cached Linear issue data"})
         if column:
             column["tone"] = "warn"

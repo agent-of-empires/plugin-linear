@@ -63,6 +63,7 @@ def build_snapshot(
         unique = {(item["path"], item["branch"]) for checkouts in checkout_map.values() for item in checkouts}
         current: dict[tuple[str, str], list[dict[str, Any]]] = {}
         errors: dict[tuple[str, str], dict[str, Any]] = {}
+        stale_keys: set[tuple[str, str]] = set()
         for path, branch in sorted(unique):
             key = (path, branch)
             issues, error = _fetch_branch(token, branch, transport)
@@ -71,11 +72,13 @@ def build_snapshot(
                 previous = _previous_repo(_state["snapshot"], path, branch)
                 if previous:
                     issues = previous.get("issues", [])
+                    if issues:
+                        stale_keys.add(key)
                 if error["kind"] == "rate_limited":
                     _state["backoff_until"] = time.monotonic() + (error.get("retry_after") or 60.0)
                     return _stale_snapshot(_state["snapshot"], sessions)
             current[key] = issues
-        output = _assemble_snapshot(sessions, checkout_map, current, errors)
+        output = _assemble_snapshot(sessions, checkout_map, current, errors, stale_keys)
         _state["snapshot"] = output
         return output
 
@@ -85,6 +88,7 @@ def _assemble_snapshot(
     checkout_map: dict[Any, list[dict[str, str]]],
     current: dict[tuple[str, str], list[dict[str, Any]]],
     errors: dict[tuple[str, str], dict[str, Any]],
+    stale_keys: set[tuple[str, str]],
 ) -> dict[str, Any]:
     output = []
     for session in sessions:
@@ -113,7 +117,7 @@ def _assemble_snapshot(
                 "project_path": session.get("project_path"),
                 "repos": repos,
                 "issues": sorted(issues_by_id.values(), key=lambda issue: issue.get("identifier", "")),
-                **({"stale": True} if session_keys & errors.keys() else {}),
+                **({"stale": True} if session_keys & stale_keys else {}),
             }
         )
     return {"sessions": output, "auth": {"present": True}}
@@ -141,10 +145,13 @@ def _stale_snapshot(cached: dict[str, Any], sessions: list[dict[str, Any]]) -> d
     results = []
     for session in sessions:
         prior = old.get(session.get("id"))
-        stale = (
-            {**prior, "stale": True}
-            if prior
-            else _empty_session(session, "Linear rate limit active; refresh will retry later.", kind="rate_limited")
-        )
+        if prior:
+            stale = {**prior}
+            if prior.get("issues"):
+                stale["stale"] = True
+            else:
+                stale.pop("stale", None)
+        else:
+            stale = _empty_session(session, "Linear rate limit active; refresh will retry later.", kind="rate_limited")
         results.append(stale)
     return {"sessions": results, "auth": cached.get("auth", {"present": True}), "rate_limited": True}
