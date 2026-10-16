@@ -1,0 +1,80 @@
+id = "agent-of-empires.linear"
+name = "Linear"
+version = "0.1.0"
+api_version = 12
+aoe_version = ">=1.14.0, <2.0.0"
+description = "Linear issue status for Agent of Empires sessions and multi-checkout workspaces."
+icon = "list-checks"
+capabilities = ["net", "runtime.worker", "session.read", "browser_open"]
+
+[[commands]]
+id = "status"
+title = "Linear: status"
+description = "Show Linear issues linked to this checkout."
+
+[[commands]]
+id = "refresh"
+title = "Linear: refresh"
+description = "Refresh Linear issues for active sessions."
+
+[[commands]]
+id = "open"
+title = "Linear: open issue"
+description = "Open the selected Linear issue for this checkout."
+[commands.action]
+kind = "open-ui-link"
+slot = "row-badge"
+id = "linear_issue_badge"
+
+[[settings]]
+key = "ui_refresh_secs"
+label = "Linear refresh interval (seconds)"
+description = "How often to refresh issue state. 0 disables background polling; startup and manual refresh remain available."
+type = "integer"
+default = 120
+min = 0
+max = 86400
+advanced = true
+
+[[settings]]
+key = "show_priority"
+label = "Show issue priority in the pane"
+description = "Include Linear priority badges in the issue selector."
+type = "boolean"
+default = true
+
+[[settings]]
+key = "ignore_submodules"
+label = "Ignore Git submodules"
+description = "Skip nested Git submodules when discovering checkouts."
+type = "boolean"
+default = true
+advanced = true
+
+[[ui]]
+slot = "row-badge"
+id = "linear_issue_badge"
+
+[[ui]]
+slot = "row-column"
+id = "linear_issue_status"
+
+[[ui]]
+slot = "sort-key"
+id = "linear_issue_attention"
+
+[[ui]]
+slot = "pane"
+id = "linear_issue_pane"
+
+[runtime]
+kind = "command"
+command = [".aoe-build/venv/bin/aoe-linear-worker"]
+
+[[runtime.build]]
+command = ["python3", "-m", "venv", ".aoe-build/venv"]
+platforms = ["linux", "macos"]
+
+[[runtime.build]]
+command = [".aoe-build/venv/bin/pip", "install", "."]
+platforms = ["linux", "macos"]
