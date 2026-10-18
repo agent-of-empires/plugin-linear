@@ -38,7 +38,11 @@ def test_worker_host_smoke_answers_startup_rpcs_and_status(tmp_path: Path) -> No
         {"jsonrpc": "2.0", "id": 1_000_000, "result": {"value": 0}},
         {"jsonrpc": "2.0", "id": 1_000_001, "result": {"value": True}},
         {"jsonrpc": "2.0", "id": 1_000_002, "result": {"value": True}},
-        {"jsonrpc": "2.0", "id": 1_000_003, "result": {"sessions": []}},
+        {"jsonrpc": "2.0", "id": 1_000_003, "result": {"value": ""}},
+        {"jsonrpc": "2.0", "id": 1_000_004, "result": {"value": ""}},
+        {"jsonrpc": "2.0", "id": 1_000_005, "result": {"value": ""}},
+        {"jsonrpc": "2.0", "id": 1_000_006, "result": {"value": ""}},
+        {"jsonrpc": "2.0", "id": 1_000_008, "result": {"sessions": [{"id": "s1", "project_path": ""}]}},
         {
             "jsonrpc": "2.0",
             "id": 42,
@@ -114,6 +118,35 @@ def test_issue_selection_repaints_cached_pane_without_network() -> None:
     assert pane["blocks"][0]["title"] == "ENG-2 · Started"
     selector = next(block for block in pane["blocks"] if block.get("title") == "Other linked issues")
     assert [row["prefix"] for row in selector["children"]] == ["ENG-1"]
+
+
+def test_suggestions_refresh_notification_publishes_host_owned_snapshot(monkeypatch) -> None:
+    output = io.StringIO()
+    runtime = Runtime(stdout=output)
+    expected = [{"id": "ENG-1", "criterion": "assigned_up_next"}]
+    runtime.handle({"method": "suggestions.refresh", "params": {}})
+    monkeypatch.setattr(worker.suggestion_data, "build_suggestions", lambda _settings: expected)
+    runtime.refresh_suggestions()
+    message = json.loads(output.getvalue())
+    assert message["method"] == "suggestions.set"
+    assert message["params"] == {"items": expected}
+    assert "provider_id" not in message["params"]["items"][0]
+
+
+def test_suggestions_failure_notifies_without_empty_snapshot(monkeypatch) -> None:
+    output = io.StringIO()
+    runtime = Runtime(stdout=output)
+    runtime.snapshot = {"sentinel": "keep"}
+
+    def fail(_settings):
+        raise worker.LinearError("Linear unavailable")
+
+    monkeypatch.setattr(worker.suggestion_data, "build_suggestions", fail)
+    runtime.refresh_suggestions()
+    message = json.loads(output.getvalue())
+    assert message["method"] == "suggestions.error"
+    assert message["params"] == {"message": "Linear unavailable"}
+    assert runtime.snapshot == {"sentinel": "keep"}
 
 
 def test_unknown_worker_method_returns_json_rpc_error() -> None:

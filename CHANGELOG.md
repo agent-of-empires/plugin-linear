@@ -9,3 +9,6 @@
 - Keep the worker alive after malformed requests or repaint failures, and defer refresh requests until the outer event loop.
 - Include pre-commit tooling and clarify personal API key configuration in the daemon environment.
 - Verify four status scenarios against the live Linear API and worker; use sanitized recorded replies in regression tests.
+- Add an API 14 Linear suggestions provider for assigned issues in configured Up Next workflow states, with optional team/project filters and explicit AoE project mappings.
+- Discover suggestions independently of AoE sessions; publish complete snapshots and preserve the last-good host snapshot when refresh fails.
+- Keep session creation, issue-text trust handling, and permission decisions in the AoE host.
