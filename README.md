@@ -13,7 +13,7 @@ Install from **Settings → Plugins → Discover** or:
 aoe plugin install agent-of-empires/plugin-linear
 ```
 
-Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon. `LINEAR_TOKEN` is accepted as an alternate environment variable. Use a Linear API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache. Authenticated live API verification was not performed as part of this implementation.
+Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache. Authenticated live API verification has not been performed.
 
 `agent-of-empires.linear` is in AoE's reserved namespace. The host requires an official featured-index pin before users can install it; that pin can only be generated for a released source tree. This implementation does not publish a release or modify AoE's featured index, so installation remains unavailable until that follow-up is approved and completed.
 
@@ -22,9 +22,9 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, and `browser_o
 ## Features
 
 - `Linear: status` returns the branch and its linked issues, with actionable auth/network/GraphQL errors.
-- `Linear: refresh` updates all active session panes; the plugin polls at the configurable interval (default 120 seconds, `0` disables polling). Repeated API calls respect Linear's `Retry-After` cooldown and use last-good state while limited.
+- `Linear: refresh` schedules an update of all active session panes in the worker's outer loop; the plugin polls at the configurable interval (default 120 seconds, `0` disables polling). Each refresh reuses one HTTP client. A rate limit stops remaining requests, retains completed results, and uses last-good state during the `Retry-After` cooldown.
 - `Linear: open issue` opens the issue currently shown on the session row.
-- Branch resolution combines Linear's issue `branchName` metadata with issue identifiers embedded in branch names (for example `feature/ENG-123-add-cache`). Multiple matches are shown in the pane; the selected issue can be changed there.
+- Branch resolution combines Linear's issue `branchName` metadata with up to five distinct issue identifiers embedded in branch names (for example `feature/ENG-123-add-cache`). A failed speculative GraphQL lookup (such as `UTF-8` in a branch name) does not discard other matches. Authentication, transport, and rate-limit failures remain visible. Multiple matches are shown in the pane; the selected issue can be changed there.
 - Session refresh considers the session checkout and host-provided `workspace_repos`, deduplicates repeated issue records, and keeps prior UI state while sessions are unavailable.
 - The row badge links to the selected issue and shows its Linear workflow-state glyph; the status column shows only its workflow state; sorting ranks urgent/high/started issues ahead of completed issues.
 - Pane details include issue status, priority, team, assignee, project, cycle, description, up to 10 recent comments, and attached resources. The selected issue appears in the pane header; the selector lists only alternate issues. Attachments may include linked pull requests when Linear has attached them.
@@ -45,6 +45,7 @@ Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 
 ```sh
 uv sync
+uv run pre-commit install
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
@@ -52,13 +53,19 @@ uv run mypy src
 uv build
 ```
 
-Worker protocol smoke test (the host answers the startup `config.get` and `sessions.list` RPCs in production):
+Worker-host smoke test, including an interleaved refresh during startup, a malformed request, and a subsequent status request:
 
 ```sh
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"linear.status","params":{"args":{"path":"."}}}' | uv run aoe-linear-worker
+uv run pytest tests/test_main.py::test_worker_host_smoke_answers_startup_rpcs_and_status
 ```
 
 Issue lookups use Linear GraphQL at `https://api.linear.app/graphql`. HTTP 429 responses honor `Retry-After` and background polling serves last-good data during the backoff. Missing credentials are reported as an actionable auth state; there is no fabricated data fallback.
+
+### Remaining release and verification gates
+
+Before merge, run against a real Linear workspace using a VCS-linked branch, an identifier-bearing branch, a `fix/issue-42`-style branch, and an issue with an attachment. Record the real status output and sanitized GraphQL responses; the current transport fixtures are hand-written, not recorded API evidence. No API key was available during the feedback update, and dashboard verification stopped at the passphrase sign-in screen.
+
+Release automation and the featured-index pin flow remain separate follow-up work: mirror plugin-github's maintainer-gated release PR, matching package/manifest versions, tag-on-merge, checked source release, and canonical `aoe plugin hash` pin proposal. Do not publish a release or change AoE's trust root as part of a code-review update. A host secret-setting type, aliased multi-branch GraphQL batching, and authenticated dashboard screenshots also remain follow-ups.
 
 ## License
 
