@@ -101,8 +101,9 @@ def test_issue_selection_repaints_cached_pane_without_network() -> None:
         for message in pushed
         if message.get("method") == "ui.state.set" and message["params"]["slot"] == PANE_SLOT[0]
     )
-    selected = next(row for block in pane["blocks"] for row in block.get("children", []) if row.get("selected"))
-    assert selected["prefix"] == "ENG-2"
+    assert pane["blocks"][0]["title"] == "ENG-2 · Started"
+    selector = next(block for block in pane["blocks"] if block.get("title") == "Other linked issues")
+    assert [row["prefix"] for row in selector["children"]] == ["ENG-1"]
 
 
 def test_unknown_worker_method_returns_json_rpc_error() -> None:
