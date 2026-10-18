@@ -19,6 +19,7 @@ ISSUE_FIELDS = """
   cycle { id name number startsAt endsAt }
   labels { nodes { id name color } }
   attachments { nodes { id title subtitle url } }
+  comments(last: 10) { nodes { id body user { name } } }
 """
 
 
