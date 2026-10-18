@@ -19,11 +19,12 @@ ISSUE_FIELDS = """
   cycle { id name number startsAt endsAt }
   labels { nodes { id name color } }
   attachments { nodes { id title subtitle url } }
+  comments(last: 10) { nodes { id body user { name } } }
 """
 
 
 class LinearClient:
-    """Linear GraphQL transport with bearer auth and bounded request timeouts."""
+    """Linear GraphQL transport with personal API key auth and bounded timeouts."""
 
     def __init__(
         self,
@@ -55,7 +56,7 @@ class LinearClient:
             raise LinearNetworkError("Could not reach Linear. Check network connectivity.") from exc
         if response.status_code in (401, 403):
             raise LinearAuthError(
-                "Linear rejected the API key. Check LINEAR_API_KEY in plugin settings or environment."
+                "Linear rejected the API key. Set LINEAR_API_KEY in the AoE daemon's environment and restart it."
             )
         if response.status_code == 429:
             retry_after = _retry_after(response.headers.get("Retry-After"))
