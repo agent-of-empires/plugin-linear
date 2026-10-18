@@ -8,3 +8,4 @@
 - Reuse the refresh HTTP client and retain completed results when a rate limit interrupts a refresh.
 - Keep the worker alive after malformed requests or repaint failures, and defer refresh requests until the outer event loop.
 - Include pre-commit tooling and clarify personal API key configuration in the daemon environment.
+- Verify four status scenarios against the live Linear API and worker; use sanitized recorded replies in regression tests.

@@ -13,7 +13,7 @@ Install from **Settings → Plugins → Discover** or:
 aoe plugin install agent-of-empires/plugin-linear
 ```
 
-Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache. Authenticated live API verification has not been performed.
+Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache. Authenticated read-only live verification passed on 2026-10-18.
 
 `agent-of-empires.linear` is in AoE's reserved namespace. The host requires an official featured-index pin before users can install it; that pin can only be generated for a released source tree. This implementation does not publish a release or modify AoE's featured index, so installation remains unavailable until that follow-up is approved and completed.
 
@@ -61,9 +61,11 @@ uv run pytest tests/test_main.py::test_worker_host_smoke_answers_startup_rpcs_an
 
 Issue lookups use Linear GraphQL at `https://api.linear.app/graphql`. HTTP 429 responses honor `Retry-After` and background polling serves last-good data during the backoff. Missing credentials are reported as an actionable auth state; there is no fabricated data fallback.
 
-### Remaining release and verification gates
+### Live verification and remaining release gates
 
-Before merge, run against a real Linear workspace using a VCS-linked branch, an identifier-bearing branch, a `fix/issue-42`-style branch, and an issue with an attachment. Record the real status output and sanitized GraphQL responses; the current transport fixtures are hand-written, not recorded API evidence. No API key was available during the feedback update, and dashboard verification stopped at the passphrase sign-in screen.
+On 2026-10-18, the status handler and real NDJSON worker both passed four authenticated scenarios: an API-provided VCS branch, an identifier-bearing branch containing an unrelated `UTF-8` identifier, a `fix/issue-42`-style unknown identifier, and an issue with an attachment. The attachment also produced a linked-resource pane payload. This is API/protocol verification, not browser-render verification; dashboard QA still stops at the passphrase sign-in screen.
+
+Anonymized real GraphQL replies are recorded in [`tests/fixtures/linear_live.json`](tests/fixtures/linear_live.json) and used by the offline client, resolver, refresh, and attachment-rendering regressions. String content and identities are redacted, and cycle numbers are replaced with a synthetic value; response envelopes, nulls, and workflow types are retained. Boundary tests still use synthetic inputs. No live-network test or credential is needed to run the suite.
 
 Release automation and the featured-index pin flow remain separate follow-up work: mirror plugin-github's maintainer-gated release PR, matching package/manifest versions, tag-on-merge, checked source release, and canonical `aoe plugin hash` pin proposal. Do not publish a release or change AoE's trust root as part of a code-review update. A host secret-setting type, aliased multi-branch GraphQL batching, and authenticated dashboard screenshots also remain follow-ups.
 
