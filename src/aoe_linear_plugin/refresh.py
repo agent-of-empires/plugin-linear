@@ -24,13 +24,11 @@ _state: dict[str, Any] = {
 
 
 def _fetch_branch(
-    token: str,
+    client: LinearClient,
     branch: str,
-    transport: httpx.BaseTransport | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     try:
-        with LinearClient(token, transport=transport) as client:
-            return resolve_branch(client, branch), None
+        return resolve_branch(client, branch), None
     except LinearError as exc:
         error: dict[str, Any] = {"kind": exc.kind, "hint": str(exc)}
         if exc.retry_after is not None:
@@ -64,21 +62,25 @@ def build_snapshot(
         current: dict[tuple[str, str], list[dict[str, Any]]] = {}
         errors: dict[tuple[str, str], dict[str, Any]] = {}
         stale_keys: set[tuple[str, str]] = set()
-        for path, branch in sorted(unique):
-            key = (path, branch)
-            issues, error = _fetch_branch(token, branch, transport)
-            if error:
-                errors[key] = error
-                previous = _previous_repo(_state["snapshot"], path, branch)
-                if previous:
-                    issues = previous.get("issues", [])
-                    if issues:
-                        stale_keys.add(key)
-                if error["kind"] == "rate_limited":
-                    _state["backoff_until"] = time.monotonic() + (error.get("retry_after") or 60.0)
-                    return _stale_snapshot(_state["snapshot"], sessions)
-            current[key] = issues
+        rate_limit: dict[str, Any] | None = None
+        with LinearClient(token, transport=transport) as client:
+            for path, branch in sorted(unique):
+                key = (path, branch)
+                issues, error = ([], rate_limit) if rate_limit else _fetch_branch(client, branch)
+                if error:
+                    errors[key] = error
+                    previous = _previous_repo(_state["snapshot"], path, branch)
+                    if previous:
+                        issues = previous.get("issues", [])
+                        if issues:
+                            stale_keys.add(key)
+                    if error["kind"] == "rate_limited" and rate_limit is None:
+                        rate_limit = error
+                        _state["backoff_until"] = time.monotonic() + (error.get("retry_after") or 60.0)
+                current[key] = issues
         output = _assemble_snapshot(sessions, checkout_map, current, errors, stale_keys)
+        if rate_limit:
+            output["rate_limited"] = True
         _state["snapshot"] = output
         return output
 
@@ -151,6 +153,17 @@ def _stale_snapshot(cached: dict[str, Any], sessions: list[dict[str, Any]]) -> d
                 stale["stale"] = True
             else:
                 stale.pop("stale", None)
+                if stale.get("repos"):
+                    stale["repos"] = [
+                        {
+                            **repo,
+                            "error": {
+                                "kind": "rate_limited",
+                                "hint": "Linear rate limit active; refresh will retry later.",
+                            },
+                        }
+                        for repo in stale["repos"]
+                    ]
         else:
             stale = _empty_session(session, "Linear rate limit active; refresh will retry later.", kind="rate_limited")
         results.append(stale)
