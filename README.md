@@ -7,6 +7,8 @@ The Linear plugin resolves issue state for session branches and displays it in t
 
 ## Install and authenticate
 
+Requires Agent of Empires 1.20.0+ (plugin SDK API 19).
+
 Install from **Settings → Plugins → Discover** or:
 
 ```sh

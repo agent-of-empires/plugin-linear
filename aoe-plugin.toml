@@ -1,9 +1,9 @@
 id = "agent-of-empires.linear"
 name = "Linear"
 version = "0.1.0"
-api_version = 14
+api_version = 19
 suggestions = true
-aoe_version = ">=1.14.0, <2.0.0"
+aoe_version = ">=1.20.0, <2.0.0"
 description = "Linear issue status for Agent of Empires sessions and multi-checkout workspaces."
 icon = "circle-dot"
 icon_asset = "assets/linear-icon.png"
