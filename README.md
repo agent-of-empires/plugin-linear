@@ -26,8 +26,8 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, and `browser_o
 - `Linear: open issue` opens the issue currently shown on the session row.
 - Branch resolution combines Linear's issue `branchName` metadata with issue identifiers embedded in branch names (for example `feature/ENG-123-add-cache`). Multiple matches are shown in the pane; the selected issue can be changed there.
 - Session refresh considers the session checkout and host-provided `workspace_repos`, deduplicates repeated issue records, and keeps prior UI state while sessions are unavailable.
-- The row badge links to the selected issue; the status column shows its workflow state and identifier; sorting ranks urgent/high/started issues ahead of completed issues.
-- Pane details include issue status, priority, team, assignee, project, cycle, description, and attached resources. Attachments may include linked pull requests when Linear's integration has attached them.
+- The row badge links to the selected issue and shows its Linear workflow-state glyph; the status column shows only its workflow state; sorting ranks urgent/high/started issues ahead of completed issues.
+- Pane details include issue status, priority, team, assignee, project, cycle, description, up to 10 recent comments, and attached resources. The selected issue appears in the pane header; the selector lists only alternate issues. Attachments may include linked pull requests when Linear has attached them.
 
 ### GitHub plugin feature mapping
 
