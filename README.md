@@ -1,5 +1,8 @@
 # Linear plugin for Agent of Empires
 
+Refresh failures keep previously loaded issue data visible and mark it stale.
+A failure before any issue data is cached is shown as unavailable, not stale.
+
 The Linear plugin resolves issue state for session branches and displays it in the session list and a Linear pane. It uses Linear's GraphQL API directly; it does not shell out to `linear` or `gh`.
 
 ## Install and authenticate

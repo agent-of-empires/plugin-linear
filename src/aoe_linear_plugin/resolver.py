@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from aoe_linear_plugin.client import LinearClient
+from aoe_linear_plugin.errors import LinearGraphQLError
 
 _IDENTIFIER = re.compile(r"(?<![A-Z0-9])([A-Z][A-Z0-9]{0,19}-[1-9][0-9]*)(?![A-Z0-9])", re.IGNORECASE)
 
@@ -34,10 +35,14 @@ def resolve_branch(client: LinearClient, branch: str) -> list[dict[str, Any]]:
         for issue in candidates.values()
         if isinstance(issue.get("identifier"), str)
     }
-    for identifier in identifiers_in_branch(branch):
+    for identifier in identifiers_in_branch(branch)[:5]:
         if identifier.casefold() in known_identifiers:
             continue
-        identifier_issue = client.issue_by_identifier(identifier)
+        try:
+            identifier_issue = client.issue_by_identifier(identifier)
+        except LinearGraphQLError:
+            # Branch text is speculative: e.g. UTF-8 is not necessarily an issue.
+            continue
         if identifier_issue and isinstance(identifier_issue.get("id"), str):
             candidates[identifier_issue["id"]] = identifier_issue
     return sorted(candidates.values(), key=lambda issue: (issue.get("identifier", ""), issue.get("title", "")))

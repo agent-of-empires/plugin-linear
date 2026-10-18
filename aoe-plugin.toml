@@ -4,7 +4,8 @@ version = "0.1.0"
 api_version = 12
 aoe_version = ">=1.14.0, <2.0.0"
 description = "Linear issue status for Agent of Empires sessions and multi-checkout workspaces."
-icon = "list-checks"
+icon = "circle-dot"
+icon_asset = "assets/linear-icon.png"
 capabilities = ["net", "runtime.worker", "session.read", "browser_open"]
 
 [[commands]]

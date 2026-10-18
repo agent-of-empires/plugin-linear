@@ -59,6 +59,7 @@ class Runtime:
         self.ignore_submodules = True
         self.show_priority = True
         self.next_refresh = 0.0
+        self.refresh_due = False
 
     def send(self, message: dict[str, Any]) -> None:
         with self.lock:
@@ -111,7 +112,6 @@ class Runtime:
         active = {item.get("session_id") for item in self.snapshot.get("sessions", [])}
         self._remove_vanished(active)
         self.pushed = {sid for sid in active if isinstance(sid, str)}
-        self.next_refresh = time.monotonic() + self.interval if self.interval else float("inf")
 
     def _remove_vanished(self, active: set[Any]) -> None:
         for sid in self.pushed - active:
@@ -137,7 +137,7 @@ class Runtime:
 
     def _after_command(self, method: str, params: dict[str, Any]) -> None:
         if method == "linear.refresh":
-            self.refresh()
+            self.refresh_due = True
         elif method == SELECT_METHOD:
             sid = params.get("session_id")
             identifier = params.get("issue")
@@ -152,18 +152,22 @@ class Runtime:
         params = message.get("params") or {}
         msg_id = message.get("id")
         try:
+            if method not in ("linear.status", "linear.open", "linear.refresh", SELECT_METHOD):
+                if isinstance(msg_id, int):
+                    self.send(_error(msg_id, "method_not_found", f"Unknown method: {method}"))
+                return
             result = self._command_result(method, params)
-        except LookupError:
-            if isinstance(msg_id, int):
-                self.send(_error(msg_id, "method_not_found", f"Unknown method: {method}"))
-            return
+            self._after_command(method, params)
         except (LinearError, ValueError) as exc:
             if isinstance(msg_id, int):
                 self.send(_error(msg_id, getattr(exc, "kind", "invalid_request"), str(exc)))
             return
+        except Exception:  # noqa: BLE001 — isolate malformed requests and unexpected repaint failures.
+            if isinstance(msg_id, int):
+                self.send(_error(msg_id, "internal_error", "Linear command failed unexpectedly."))
+            return
         if isinstance(msg_id, int):
             self.send(_response(msg_id, result))
-        self._after_command(method, params)
 
     def _configure(self) -> None:
         result = self.call_host("config.get", {"key": "ui_refresh_secs"})
@@ -186,17 +190,27 @@ class Runtime:
         if isinstance(value, bool):
             setattr(self, key, value)
 
+    def _scheduled_refresh(self) -> None:
+        self.refresh_due = False
+        try:
+            self.refresh()
+        except Exception:  # noqa: BLE001 — one failed poll must not terminate the worker.
+            sys.stderr.write("Linear refresh failed unexpectedly.\n")
+        finally:
+            self.next_refresh = time.monotonic() + self.interval if self.interval else float("inf")
+
     def run(self) -> None:
         threading.Thread(target=self._read, daemon=True).start()
         self._configure()
-        self.refresh()
-        self.next_refresh = time.monotonic() + self.interval if self.interval else float("inf")
         while not self.stopped:
+            if self.refresh_due or time.monotonic() >= self.next_refresh:
+                self._scheduled_refresh()
+            if self.stopped:
+                break
             timeout = max(0.0, self.next_refresh - time.monotonic()) if self.interval else None
             try:
                 item = self.inbox.get(timeout=timeout)
             except queue.Empty:
-                self.refresh()
                 continue
             if item is EOF:
                 break

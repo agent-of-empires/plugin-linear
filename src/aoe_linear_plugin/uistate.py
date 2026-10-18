@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 ROW_BADGE_SLOT = ("row-badge", "linear_issue_badge")
@@ -21,6 +22,27 @@ _PRIORITY = {1: "Urgent", 2: "High", 3: "Normal", 4: "Low"}
 def _state(issue: dict[str, Any]) -> dict[str, Any]:
     state = issue.get("state")
     return state if isinstance(state, dict) else {}
+
+
+_STATE_VISUAL = {
+    "backlog": ("circle-dashed", "neutral"),
+    "unstarted": ("circle", "neutral"),
+    "started": ("circle-dot", "info"),
+    "completed": ("circle-check", "success"),
+    "canceled": ("circle-x", "neutral"),
+}
+
+
+def _state_visual(issue: dict[str, Any]) -> tuple[str, str, str | None]:
+    state = _state(issue)
+    state_type = state.get("type")
+    if not isinstance(state_type, str):
+        state_type = ""
+    icon, tone = _STATE_VISUAL.get(state_type, ("circle", "neutral"))
+    color = state.get("color")
+    if isinstance(color, str) and re.fullmatch(r"#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?", color):
+        return icon, tone, color
+    return icon, tone, None
 
 
 def _rank(issue: dict[str, Any]) -> int:
@@ -53,23 +75,33 @@ def _issue_rows(
     show_priority: bool,
 ) -> list[dict[str, Any]]:
     rows = []
+    chosen_identifier = chosen.get("identifier")
     for issue in issues:
+        identifier = issue.get("identifier")
+        if identifier == chosen_identifier:
+            continue
         state = _state(issue)
-        assignee = issue.get("assignee") or {}
-        assignee_name = assignee.get("displayName") or assignee.get("name", "")
+        icon, tone, color = _state_visual(issue)
+        issue_key = identifier if isinstance(identifier, str) else ""
         row: dict[str, Any] = {
             "kind": "row",
-            "prefix": issue.get("identifier", ""),
+            "prefix": issue_key,
             "label": issue.get("title", ""),
-            "sublabel": " · ".join(part for part in (state.get("name", ""), assignee_name) if part),
-            "selected": issue.get("identifier") == chosen.get("identifier"),
+            "icon": icon,
+            "mono": True,
             "method": SELECT_METHOD,
-            "params": {"issue": issue.get("identifier", "")},
+            "params": {"issue": issue_key},
             "href": issue.get("url"),
+            "tone": tone,
         }
-        if show_priority and issue.get("priority"):
-            tone = "warn" if issue["priority"] == 1 else "neutral"
-            row["badges"] = [{"text": f"P{issue['priority']}", "tone": tone}]
+        state_name = state.get("name")
+        if isinstance(state_name, str) and state_name:
+            row["sublabel"] = state_name
+        if color:
+            row["color"] = color
+        priority = issue.get("priority")
+        if show_priority and isinstance(priority, int) and priority in _PRIORITY:
+            row["badges"] = [{"text": f"P{priority}", "tone": "warn" if priority == 1 else "neutral"}]
         rows.append(row)
     return rows
 
@@ -103,10 +135,12 @@ def _details(issue: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _resource_section(issue: dict[str, Any]) -> dict[str, Any] | None:
+    attachments = issue.get("attachments")
+    nodes = attachments.get("nodes", []) if isinstance(attachments, dict) else []
+    if not isinstance(nodes, list):
+        return None
     links = [
-        attachment
-        for attachment in issue.get("attachments", [])
-        if isinstance(attachment, dict) and isinstance(attachment.get("url"), str)
+        attachment for attachment in nodes if isinstance(attachment, dict) and isinstance(attachment.get("url"), str)
     ]
     if not links:
         return None
@@ -122,28 +156,68 @@ def _resource_section(issue: dict[str, Any]) -> dict[str, Any] | None:
     return {"kind": "section", "title": "Linked resources", "children": rows}
 
 
-def _pane(session: dict[str, Any], selected: str | None, *, show_priority: bool) -> dict[str, Any]:
-    issues = _sort_issues(session.get("issues", []))
-    chosen = _selected(issues, selected)
-    blocks: list[dict[str, Any]] = []
-    if session.get("stale"):
+def _comments_section(issue: dict[str, Any]) -> dict[str, Any] | None:
+    comments = issue.get("comments")
+    nodes = comments.get("nodes", []) if isinstance(comments, dict) else []
+    if not isinstance(nodes, list):
+        return None
+    blocks = []
+    for comment in nodes[-10:]:
+        if not isinstance(comment, dict):
+            continue
+        body = comment.get("body")
+        if not isinstance(body, str) or not body.strip():
+            continue
+        user = comment.get("user")
+        author = user.get("name") if isinstance(user, dict) else None
+        if not isinstance(author, str) or not author.strip():
+            author = "Unknown"
         blocks.append(
             {
-                "kind": "note",
-                "text": "Showing cached Linear issue data; the latest refresh failed.",
+                "kind": "comment",
+                "author": author,
+                "body": body[:2000] + ("…" if len(body) > 2000 else ""),
+            }
+        )
+    if not blocks:
+        return None
+    return {
+        "kind": "section",
+        "title": "Comments",
+        "value": str(len(blocks)),
+        "boxed": True,
+        "scroll": True,
+        "children": blocks,
+    }
+
+
+def _stale_blocks(session: dict[str, Any], *, has_issues: bool) -> list[dict[str, Any]]:
+    if not session.get("stale") or not has_issues:
+        return []
+    blocks: list[dict[str, Any]] = [
+        {
+            "kind": "note",
+            "text": "Showing cached Linear issue data; the latest refresh failed.",
+            "tone": "warn",
+        }
+    ]
+    error = _error_for(session)
+    if error:
+        blocks.append(
+            {
+                "kind": "callout",
+                "title": "Linear refresh failed",
+                "detail": error.get("hint", "Request failed"),
                 "tone": "warn",
             }
         )
-        error = _error_for(session)
-        if error:
-            blocks.append(
-                {
-                    "kind": "callout",
-                    "title": "Linear refresh failed",
-                    "detail": error.get("hint", "Request failed"),
-                    "tone": "warn",
-                }
-            )
+    return blocks
+
+
+def _pane(session: dict[str, Any], selected: str | None, *, show_priority: bool) -> dict[str, Any]:
+    issues = _sort_issues(session.get("issues", []))
+    chosen = _selected(issues, selected)
+    blocks = _stale_blocks(session, has_issues=bool(issues))
     if chosen is None:
         error = _error_for(session)
         if error:
@@ -163,27 +237,31 @@ def _pane(session: dict[str, Any], selected: str | None, *, show_priority: bool)
                     "tone": "neutral",
                 }
             )
-        return {"title": "Linear", "default_location": "right", "icon": "list-checks", "blocks": blocks}
+        return {"title": "Linear", "default_location": "right", "icon": "circle-dot", "blocks": blocks}
 
     state = _state(chosen)
-    tone = "success" if state.get("type") == "completed" else "info"
-    blocks.append(
-        {
-            "kind": "callout",
-            "title": f"{chosen.get('identifier', 'Issue')} · {state.get('name', 'Unknown status')}",
-            "detail": chosen.get("title", ""),
-            "tone": tone,
-        }
-    )
-    blocks.append(
-        {
-            "kind": "section",
-            "title": "Linked issues",
-            "children": _issue_rows(issues, chosen, show_priority=show_priority),
-            "value": str(len(issues)),
-            "boxed": True,
-        }
-    )
+    icon, tone, color = _state_visual(chosen)
+    callout: dict[str, Any] = {
+        "kind": "callout",
+        "title": f"{chosen.get('identifier', 'Issue')} · {state.get('name', 'Unknown status')}",
+        "detail": chosen.get("title", ""),
+        "icon": icon,
+        "tone": tone,
+    }
+    if color:
+        callout["color"] = color
+    blocks.append(callout)
+    issue_rows = _issue_rows(issues, chosen, show_priority=show_priority)
+    if issue_rows:
+        blocks.append(
+            {
+                "kind": "section",
+                "title": "Other linked issues",
+                "children": issue_rows,
+                "value": str(len(issue_rows)),
+                "boxed": True,
+            }
+        )
     details = _details(chosen)
     if details:
         blocks.append({"kind": "section", "title": "Details", "children": details})
@@ -201,7 +279,10 @@ def _pane(session: dict[str, Any], selected: str | None, *, show_priority: bool)
     resources = _resource_section(chosen)
     if resources:
         blocks.append(resources)
-    return {"title": "Linear", "default_location": "right", "icon": "list-checks", "blocks": blocks}
+    comments = _comments_section(chosen)
+    if comments:
+        blocks.append(comments)
+    return {"title": "Linear", "default_location": "right", "icon": "circle-dot", "blocks": blocks}
 
 
 def _session_ui(
@@ -219,17 +300,19 @@ def _session_ui(
     column: dict[str, Any] = {}
     if current:
         state = _state(current)
-        tone = "success" if state.get("type") == "completed" else "warn" if current.get("priority") == 1 else "info"
+        icon, state_tone, _ = _state_visual(current)
+        tone = "success" if state.get("type") == "completed" else "warn" if current.get("priority") == 1 else state_tone
         badge_items.append(
             {
                 "text": current.get("identifier", "Linear"),
+                "icon": icon,
                 "tone": tone,
                 "href": current.get("url"),
                 "tooltip": current.get("title", ""),
             }
         )
         column = {
-            "text": f"{state.get('name', 'Open')} · {current.get('identifier', '')}",
+            "text": state.get("name", "Open"),
             "tone": tone,
             "tooltip": current.get("title", ""),
             "sort_value": _rank(current),
@@ -240,7 +323,7 @@ def _session_ui(
             hint = error.get("hint", "Linear request failed")
             badge_items.append({"text": "Linear error", "tone": "danger", "tooltip": hint})
             column = {"text": "Linear unavailable", "tone": "danger", "tooltip": hint, "sort_value": 98}
-    if session.get("stale"):
+    if session.get("stale") and issues:
         badge_items.append({"text": "stale", "tone": "warn", "tooltip": "Showing cached Linear issue data"})
         if column:
             column["tone"] = "warn"
