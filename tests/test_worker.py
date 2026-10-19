@@ -17,6 +17,7 @@ def test_worker_status_protocol_and_notification_handling(monkeypatch, tmp_path:
     subprocess.run(["git", "init", "-b", "linear-worker-test", str(tmp_path)], check=True, capture_output=True)
     requests = [
         {"jsonrpc": "2.0", "method": "session.status.changed", "params": {}},
+        {"jsonrpc": "2.0", "method": 3, "params": "invalid"},
         {"jsonrpc": "2.0", "id": 7, "method": "plugin.community.linear.status", "params": {"path": str(tmp_path)}},
     ]
     monkeypatch.setattr(sys, "stdin", iter([json.dumps(request) + "\n" for request in requests]))

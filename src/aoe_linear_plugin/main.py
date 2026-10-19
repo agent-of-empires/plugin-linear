@@ -28,6 +28,8 @@ def _error(code: int, message: str, request_id: Any = None) -> dict[str, Any]:
 
 
 def _response(request: Any) -> dict[str, Any] | None:
+    if isinstance(request, dict) and "id" not in request:
+        return None
     response: dict[str, Any] | None = None
     if not isinstance(request, dict) or request.get("jsonrpc") != "2.0":
         response = _error(-32600, "Invalid Request")
