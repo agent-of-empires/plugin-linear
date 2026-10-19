@@ -12,3 +12,4 @@
 - Add an API 19 Linear suggestions provider for Agent of Empires 1.20.0+, covering assigned issues in configured Up Next workflow states, with optional team/project filters and explicit AoE project mappings.
 - Discover suggestions independently of AoE sessions; publish complete snapshots and preserve the last-good host snapshot when refresh fails.
 - Keep session creation, issue-text trust handling, and permission decisions in the AoE host.
+- Rank unprioritized suggestions after Urgent through Low, and restrict assigned-issue queries to eligible workflow states before pagination while retaining local eligibility checks.

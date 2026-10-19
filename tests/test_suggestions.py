@@ -48,19 +48,31 @@ def test_discovery_is_independent_of_sessions_and_maps_only_explicit_projects():
     assert item["project"] == "/work/mobile"
     assert item["criterion"] == "assigned_up_next"
     assert "untrusted source text" in item["draft"]["prompt"]
-    assert client.calls[1][1]["filter"] == {"assignee": {"id": {"eq": "viewer-1"}}}
+    assert client.calls[1][1]["filter"] == {
+        "assignee": {"id": {"eq": "viewer-1"}},
+        "state": {"name": {"in": ["Up Next"]}, "type": {"nin": ["completed", "canceled"]}},
+    }
 
 
 def test_all_pages_are_fetched_then_closed_unassigned_and_out_of_scope_items_retracted():
     client = Client(
         [
             page([issue()], has_next=True, cursor="cursor-1"),
-            page([issue("ENG-2", state="Done"), issue("ENG-3", assignee="someone"), issue("ENG-4", team="OPS")]),
+            page(
+                [
+                    issue("ENG-2", state="Done"),
+                    issue("ENG-3", assignee="someone"),
+                    issue("ENG-4", team="OPS"),
+                    {**issue("ENG-5"), "state": {"name": "Up Next", "type": "completed"}},
+                    {**issue("ENG-6"), "state": {"name": "Up Next", "type": "canceled"}},
+                ]
+            ),
         ]
     )
     items = discover_suggestions(client, settings={"suggestion_team_scope": "ENG"})
     assert [item["id"] for item in items] == ["eng-1"]
     assert client.calls[2][1]["after"] == "cursor-1"
+    assert client.calls[2][1]["filter"] == client.calls[1][1]["filter"]
 
 
 def test_incomplete_or_repeated_cursor_raises_instead_of_returning_partial_snapshot():
@@ -74,7 +86,7 @@ def test_incomplete_or_repeated_cursor_raises_instead_of_returning_partial_snaps
 
 
 def test_configured_workflow_names_and_project_filters_are_exact():
-    client = Client([page([issue(), issue("ENG-2", state="Todo"), issue("ENG-3", project="Other")])])
+    client = Client([page([issue(), issue("ENG-2", state="Todo"), issue("ENG-3", state="Todo", project="Other")])])
     items = discover_suggestions(
         client,
         settings={
@@ -84,3 +96,23 @@ def test_configured_workflow_names_and_project_filters_are_exact():
     )
     assert [item["id"] for item in items] == ["eng-2"]
     assert "project" not in items[0]
+    assert client.calls[1][1]["filter"]["state"] == {
+        "name": {"in": ["Todo"]},
+        "type": {"nin": ["completed", "canceled"]},
+    }
+
+
+def test_priority_order_places_unprioritized_issues_after_urgent_through_low():
+    client = Client([page([{**issue(f"ENG-{priority}"), "priority": priority} for priority in [0, 4, 2, 3, 1]])])
+
+    items = discover_suggestions(client)
+
+    assert [item["id"] for item in items] == ["eng-1", "eng-2", "eng-3", "eng-4", "eng-0"]
+    assert all("_priority" not in item and "_created" not in item for item in items)
+
+
+@pytest.mark.parametrize("priority", [None, "1", False, True, -1, 6])
+def test_invalid_priorities_use_the_unprioritized_fallback(priority):
+    client = Client([page([{**issue("ENG-1"), "priority": priority}, {**issue("ENG-2"), "priority": 4}])])
+
+    assert [item["id"] for item in discover_suggestions(client)] == ["eng-2", "eng-1"]
