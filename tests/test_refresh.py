@@ -101,6 +101,31 @@ def test_http_rate_limit_sets_retry_backoff(monkeypatch, tmp_path: Path) -> None
     assert refresh._state["backoff_until"] > 0
 
 
+def test_linear_graphql_rate_limit_sets_reset_backoff(monkeypatch, tmp_path: Path) -> None:
+    _checkout(tmp_path, "ENG-1")
+    monkeypatch.setattr("aoe_linear_plugin.client.time.time", lambda: 1700000000.0)
+    monkeypatch.setattr(refresh.time, "monotonic", lambda: 1000.0)
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    def response(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            headers={"X-RateLimit-Requests-Reset": "1700000045000"},
+            json={"errors": [{"message": "Rate limited", "extensions": {"code": "RATELIMITED"}}]},
+        )
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(tmp_path)}],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(response),
+    )
+
+    assert snapshot["rate_limited"] is True
+    assert snapshot["sessions"][0]["repos"][0]["error"]["kind"] == "rate_limited"
+    assert snapshot["sessions"][0]["repos"][0]["error"]["retry_after"] == 45.0
+    assert refresh._state["backoff_until"] == 1045.0
+
+
 def test_http_failure_without_cached_issue_data_does_not_mark_snapshot_stale(monkeypatch, tmp_path: Path) -> None:
     _checkout(tmp_path, "feature/unlinked")
     previous = {
