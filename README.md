@@ -7,6 +7,8 @@ The Linear plugin resolves issue state for session branches and displays it in t
 
 ## Install and authenticate
 
+Requires Agent of Empires 1.20.0+ (plugin SDK API 19).
+
 Install from **Settings → Plugins → Discover** or:
 
 ```sh
@@ -29,6 +31,9 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, and `browser_o
 - The row badge links to the selected issue and shows its Linear workflow-state glyph; the status column shows only its workflow state; sorting ranks urgent/high/started issues ahead of completed issues.
 - Pane details include issue status, priority, team, assignee, project, cycle, description, up to 10 recent comments, and attached resources. The selected issue appears in the pane header; the selector lists only alternate issues. Attachments may include linked pull requests when Linear has attached them.
 
+- Suggestions independently discover your assigned issues in the configured Linear workflow states (default: exact state name `Up Next`), without depending on existing AoE sessions. Every successful complete refresh replaces the current snapshot; API failures report an error and do not replace the last-good snapshot.
+- Each suggestion links to its canonical Linear issue URL and includes a preview and an actionable prompt that identifies issue text as untrusted input. The worker only publishes issue data to the host; session creation, prompting, trust defaults, and permission checks remain host-owned.
+
 ### GitHub plugin feature mapping
 
 Linear is an issue tracker, not a source-control or CI provider. This plugin reports Linear issue/workflow state and attached issue resources only. Linear does not provide GitHub's pull-request mergeability/conflicts, review decisions or reviewer roster, CI check runs, unresolved review threads, PR diff statistics, merge verdict, or PR timeline. The plugin does not infer or synthesize those states. A linked pull request is shown only when it exists as a Linear issue attachment; it is a link, not a PR status integration.
@@ -38,6 +43,9 @@ Linear is an issue tracker, not a source-control or CI provider. This plugin rep
 - **Refresh interval**: 0–86400 seconds (default 120); zero disables background polling.
 - **Show priority**: controls priority badges in the issue selector.
 - **Ignore Git submodules**: excludes initialized nested child submodules during checkout discovery; the session's primary checkout is retained.
+- **Suggestion workflow states**: comma-separated exact Linear state names; defaults to `Up Next`.
+- **Suggestion teams/projects**: optional comma-separated exact Linear team keys/IDs and project names/IDs; empty means no additional scope restriction.
+- **Suggestion AoE project mappings**: optional JSON object mapping Linear project IDs or names to an exact registered AoE project name or canonical local path. Unmapped issues have no project assignment; the provider never guesses a scratch project.
 
 ## Development
 

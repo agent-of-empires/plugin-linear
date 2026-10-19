@@ -1,8 +1,9 @@
 id = "agent-of-empires.linear"
 name = "Linear"
 version = "0.1.0"
-api_version = 12
-aoe_version = ">=1.14.0, <2.0.0"
+api_version = 19
+suggestions = true
+aoe_version = ">=1.20.0, <2.0.0"
 description = "Linear issue status for Agent of Empires sessions and multi-checkout workspaces."
 icon = "circle-dot"
 icon_asset = "assets/linear-icon.png"
@@ -51,6 +52,34 @@ description = "Skip nested Git submodules when discovering checkouts."
 type = "boolean"
 default = true
 advanced = true
+
+[[settings]]
+key = "suggestion_up_next_states"
+label = "Linear suggestion workflow states"
+description = "Comma-separated exact Linear workflow state names that qualify; defaults to Up Next."
+type = "string"
+default = "Up Next"
+
+[[settings]]
+key = "suggestion_team_scope"
+label = "Linear suggestion teams"
+description = "Optional comma-separated Linear team keys or IDs; empty includes all teams."
+type = "string"
+default = ""
+
+[[settings]]
+key = "suggestion_project_scope"
+label = "Linear suggestion projects"
+description = "Optional comma-separated exact Linear project names or IDs; empty includes all projects."
+type = "string"
+default = ""
+
+[[settings]]
+key = "suggestion_project_mappings"
+label = "Linear suggestion AoE project mappings"
+description = "Optional JSON object mapping Linear project IDs or names to exact registered AoE project names or canonical local paths."
+type = "string"
+default = "{}"
 
 [[ui]]
 slot = "row-badge"
