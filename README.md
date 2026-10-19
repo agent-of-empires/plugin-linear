@@ -1,6 +1,6 @@
 # Linear plugin for Agent of Empires
 
-Resolve Linear issues linked to the current Git branch and open a selected issue. The worker reads `LINEAR_API_KEY` (or `LINEAR_TOKEN`) from its environment; it does not read or write Linear issues.
+Resolve Linear issues linked to the current Git branch and open a selected issue. The worker reads issue data using `LINEAR_API_KEY` (or `LINEAR_TOKEN`) from its environment but does not modify Linear issues.
 
 ## Install from source
 
