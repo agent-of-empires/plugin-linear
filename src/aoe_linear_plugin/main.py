@@ -231,7 +231,18 @@ class Runtime:
     def _scheduled_refresh(self) -> None:
         self.refresh_due = False
         try:
-            self.refresh_suggestions()
+            try:
+                self.refresh_suggestions()
+            except Exception:  # noqa: BLE001 — suggestion failures must not block session refresh.
+                sys.stderr.write("Linear suggestion refresh failed unexpectedly.\n")
+                self.send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": next(_ids),
+                        "method": "suggestions.error",
+                        "params": {"message": "Linear suggestion refresh failed unexpectedly."},
+                    }
+                )
             self.refresh()
         except Exception:  # noqa: BLE001 — one failed poll must not terminate the worker.
             sys.stderr.write("Linear refresh failed unexpectedly.\n")

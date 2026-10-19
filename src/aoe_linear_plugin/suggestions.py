@@ -39,7 +39,7 @@ def _setting_list(value: Any, default: list[str], name: str) -> list[str]:
         return default
     if not isinstance(value, str):
         raise TypeError(f"{name} must be a comma-separated list.")
-    return sorted({part.strip() for part in value.split(",") if part.strip()})
+    return sorted({part.strip() for part in value.split(",") if part.strip()}) or default
 
 
 def _project_mapping(settings: dict[str, Any]) -> dict[str, str]:

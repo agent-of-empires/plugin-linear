@@ -8,9 +8,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 
 from aoe_linear_plugin import main as worker
+from aoe_linear_plugin.client import LinearClient
 from aoe_linear_plugin.main import Runtime
 from aoe_linear_plugin.uistate import PANE_SLOT
 
@@ -214,3 +216,63 @@ def test_failed_poll_preserves_command_loop(monkeypatch, capsys) -> None:
     assert "sensitive response data" not in capsys.readouterr().err
     runtime.handle({"id": 2, "method": "linear.refresh"})
     assert runtime.refresh_due is True
+
+
+def test_unexpected_suggestion_failure_preserves_queue_and_refreshes_session_surfaces(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("LINEAR_API_KEY", "test-token")
+
+    def respond(request):
+        if "SuggestionViewer" in json.loads(request.content)["query"]:
+            return httpx.Response(200, json={"data": {"viewer": {"id": "viewer-1"}}})
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "issues": {
+                        "nodes": [{"state": "sensitive response data", "assignee": {"id": "viewer-1"}}],
+                        "pageInfo": {"hasNextPage": False},
+                    }
+                }
+            },
+        )
+
+    monkeypatch.setattr(
+        worker.suggestion_data,
+        "LinearClient",
+        lambda token: LinearClient(token, transport=httpx.MockTransport(respond)),
+    )
+    fresh_snapshot = {
+        "sessions": [
+            {
+                "session_id": "s1",
+                "issues": [{"identifier": "ENG-1", "title": "Updated issue", "state": {"name": "Started"}}],
+            }
+        ]
+    }
+    output = io.StringIO()
+    runtime = Runtime(stdout=output)
+    monkeypatch.setattr(runtime, "call_host", lambda *_args: {"sessions": [{"id": "s1"}]})
+    monkeypatch.setattr(worker.refresh_data, "build_snapshot", lambda *_args, **_kwargs: fresh_snapshot)
+    last_good_queue = [{"id": "keep"}]
+    host_queue = last_good_queue
+
+    runtime._scheduled_refresh()
+
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    for message in messages:
+        if message.get("method") == "suggestions.set":
+            host_queue = message["params"]["items"]
+    assert host_queue == last_good_queue
+    error = next(message for message in messages if message.get("method") == "suggestions.error")
+    assert error["params"] == {"message": "Linear suggestion refresh failed unexpectedly."}
+    panes = {
+        message["params"]["slot"]: message["params"]["payload"]
+        for message in messages
+        if message.get("method") == "ui.state.set" and message["params"].get("session_id") == "s1"
+    }
+    assert panes["pane"]["blocks"][0]["title"] == "ENG-1 · Started"
+    assert panes["row-badge"]["items"][0]["text"] == "ENG-1"
+    assert panes["row-column"]["text"] == "Started"
+    assert runtime.snapshot == fresh_snapshot
+    assert runtime.next_refresh > worker.time.monotonic()
+    assert "sensitive response data" not in output.getvalue() + capsys.readouterr().err

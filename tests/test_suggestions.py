@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import io
+import json
+
 import pytest
 
+from aoe_linear_plugin import main as worker
 from aoe_linear_plugin.errors import LinearGraphQLError
 from aoe_linear_plugin.suggestions import discover_suggestions
 
@@ -116,3 +120,49 @@ def test_invalid_priorities_use_the_unprioritized_fallback(priority):
     client = Client([page([{**issue("ENG-1"), "priority": priority}, {**issue("ENG-2"), "priority": 4}])])
 
     assert [item["id"] for item in discover_suggestions(client)] == ["eng-2", "eng-1"]
+
+
+@pytest.mark.parametrize(
+    ("configured", "names", "expected_ids"),
+    [
+        (None, ["Up Next"], ["eng-1"]),
+        ("", ["Up Next"], ["eng-1"]),
+        (" \t ", ["Up Next"], ["eng-1"]),
+        (" , , ", ["Up Next"], ["eng-1"]),
+        (" Todo , Todo ", ["Todo"], ["eng-2"]),
+        ("todo", ["todo"], ["eng-3"]),
+        (" Todo , Up Next ", ["Todo", "Up Next"], ["eng-1", "eng-2"]),
+    ],
+)
+def test_workflow_settings_publish_normalized_snapshots_with_empty_scopes(monkeypatch, configured, names, expected_ids):
+    client = Client(
+        [
+            page(
+                [
+                    issue(team="OPS", project="Other"),
+                    issue("ENG-2", state="Todo", team="OPS", project="Other"),
+                    issue("ENG-3", state="todo", team="OPS", project="Other"),
+                ]
+            )
+        ]
+    )
+    output = io.StringIO()
+    runtime = worker.Runtime(stdout=output)
+    runtime.suggestion_settings = {
+        "suggestion_up_next_states": configured,
+        "suggestion_team_scope": "",
+        "suggestion_project_scope": " , \t ",
+    }
+    monkeypatch.setattr(
+        worker.suggestion_data,
+        "build_suggestions",
+        lambda settings: discover_suggestions(client, settings=settings),
+    )
+
+    runtime.refresh_suggestions()
+
+    message = json.loads(output.getvalue())
+    assert message["method"] == "suggestions.set"
+    assert [item["id"] for item in message["params"]["items"]] == expected_ids
+    assert all(item["criterion"] == "assigned_up_next" for item in message["params"]["items"])
+    assert client.calls[1][1]["filter"]["state"]["name"] == {"in": names}
