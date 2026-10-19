@@ -31,18 +31,18 @@ def test_active_rate_limit_serves_last_good_snapshot_without_http(monkeypatch, t
     assert snapshot["rate_limited"] is True
 
 
-def test_shared_checkout_is_queried_once_for_multiple_sessions(monkeypatch, tmp_path: Path) -> None:
-    _checkout(tmp_path, "ENG-7-change")
+def test_shared_checkout_is_queried_once_for_multiple_sessions(
+    monkeypatch, tmp_path: Path, recorded_linear_responses
+) -> None:
+    _checkout(tmp_path, "recorded/live-1-branch")
     monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
     requests = []
 
     def respond(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         requests.append(payload["query"])
-        return httpx.Response(
-            200,
-            json={"data": {"issueVcsBranchSearch": {"id": "i7", "identifier": "ENG-7", "title": "Task"}}},
-        )
+        recorded = recorded_linear_responses["branch_match"]
+        return httpx.Response(recorded["http_status"], json=recorded["body"])
 
     shared_path = str(tmp_path)
     sessions = [
@@ -51,7 +51,7 @@ def test_shared_checkout_is_queried_once_for_multiple_sessions(monkeypatch, tmp_
     ]
     snapshot = refresh.build_snapshot(sessions, env={"LINEAR_API_KEY": "token"}, transport=httpx.MockTransport(respond))
     assert len(requests) == 1
-    assert [session["issues"][0]["identifier"] for session in snapshot["sessions"]] == ["ENG-7", "ENG-7"]
+    assert [session["issues"][0]["identifier"] for session in snapshot["sessions"]] == ["LIVE-1", "LIVE-1"]
 
 
 def test_workspace_repos_sharing_branch_are_queried_once(monkeypatch, tmp_path: Path) -> None:

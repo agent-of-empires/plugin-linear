@@ -3,7 +3,7 @@ from __future__ import annotations
 from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, ROW_COLUMN_SLOT, session_payloads
 
 
-def test_session_ui_shows_linear_status_and_selectable_linked_issues() -> None:
+def test_session_ui_shows_linear_status_and_selectable_linked_issues(recorded_linear_responses) -> None:
     issues = [
         {
             "id": "2",
@@ -22,16 +22,9 @@ def test_session_ui_shows_linear_status_and_selectable_linked_issues() -> None:
             "state": {"name": "In Progress", "type": "started", "color": "#5e6ad2"},
             "assignee": {"displayName": "A User"},
             "labels": {"nodes": [{"name": "Bug"}, {"name": "Backend"}]},
-            "attachments": {
-                "nodes": [
-                    {
-                        "id": "attachment-1",
-                        "title": "Pull request",
-                        "subtitle": "PR #1",
-                        "url": "https://github.com/acme/repo/pull/1",
-                    }
-                ]
-            },
+            "attachments": recorded_linear_responses["branch_match"]["body"]["data"]["issueVcsBranchSearch"][
+                "attachments"
+            ],
             "comments": {"nodes": [{"id": "comment-1", "body": "The fix is ready.", "user": {"name": "A User"}}]},
         },
     ]
@@ -63,7 +56,7 @@ def test_session_ui_shows_linear_status_and_selectable_linked_issues() -> None:
     details = next(block for block in pane["blocks"] if block.get("title") == "Details")
     assert {"kind": "row", "label": "Labels", "value": "Bug, Backend"} in details["children"]
     resources = next(block for block in pane["blocks"] if block.get("title") == "Linked resources")
-    assert resources["children"][0]["href"] == "https://github.com/acme/repo/pull/1"
+    assert resources["children"][0]["href"] == "https://example.invalid/recorded-resource"
     comments = next(block for block in pane["blocks"] if block.get("title") == "Comments")
     assert comments["children"] == [{"kind": "comment", "author": "A User", "body": "The fix is ready."}]
 

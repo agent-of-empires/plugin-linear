@@ -32,33 +32,40 @@ def test_resolve_branch_combines_branch_metadata_and_identifiers() -> None:
     assert requested == ["OPS-7"]
 
 
-@pytest.mark.parametrize("branch", ["eng-12-fix-utf-8-decoding", "fix/issue-42", "chore/bump-python-3.12"])
-def test_speculative_graphql_failure_preserves_branch_match(branch) -> None:
-    issue = {"id": "1", "identifier": "ENG-12"}
+@pytest.mark.parametrize("branch", ["live-1-fix-utf-8-decoding", "fix/issue-42", "chore/bump-python-3.12"])
+def test_speculative_graphql_failure_preserves_branch_match(branch, recorded_linear_responses) -> None:
+    """Exercise synthetic branch variants with the recorded not-found error."""
+    issue = {
+        **recorded_linear_responses["branch_match"]["body"]["data"]["issueVcsBranchSearch"],
+        "branchName": branch,
+    }
 
     def respond(request):
         variables = json.loads(request.content)["variables"]
         if "branchName" in variables:
             return httpx.Response(200, json={"data": {"issueVcsBranchSearch": issue}})
-        return httpx.Response(200, json={"data": None, "errors": [{"message": "Entity not found: Issue"}]})
+        recorded = recorded_linear_responses["identifier_not_found"]
+        return httpx.Response(recorded["http_status"], json=recorded["body"])
 
     with LinearClient("key", transport=httpx.MockTransport(respond)) as client:
         assert resolve_branch(client, branch) == [issue]
 
 
-def test_identifier_resolution_keeps_valid_issue_before_unknown_identifier() -> None:
-    issue = {"id": "1", "identifier": "ENG-12"}
+def test_identifier_resolution_keeps_valid_issue_before_unknown_identifier(recorded_linear_responses) -> None:
+    issue = recorded_linear_responses["identifier_match"]["body"]["data"]["issue"]
 
     def respond(request):
         variables = json.loads(request.content)["variables"]
         if "branchName" in variables:
-            return httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}})
-        if variables["id"] == "ENG-12":
-            return httpx.Response(200, json={"data": {"issue": issue}})
-        return httpx.Response(200, json={"data": None, "errors": [{"message": "Entity not found: Issue"}]})
+            recorded = recorded_linear_responses["branch_miss"]
+        elif variables["id"] == "LIVE-1":
+            recorded = recorded_linear_responses["identifier_match"]
+        else:
+            recorded = recorded_linear_responses["identifier_not_found"]
+        return httpx.Response(recorded["http_status"], json=recorded["body"])
 
     with LinearClient("key", transport=httpx.MockTransport(respond)) as client:
-        assert resolve_branch(client, "eng-12-fix-utf-8-decoding") == [issue]
+        assert resolve_branch(client, "live-1-fix-utf-8-decoding") == [issue]
 
 
 def test_speculative_lookup_count_is_bounded() -> None:
