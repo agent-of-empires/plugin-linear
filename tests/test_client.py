@@ -77,6 +77,60 @@ def test_retry_after_is_bounded_and_malformed_header_is_ignored() -> None:
         assert error.value.retry_after == expected
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("Tue, 14 Nov 2023 22:13:35 GMT", 15.0),
+        ("Tue, 14 Nov 2023 22:13:00 GMT", None),
+        ("Tue, 14 Nov 2023 23:13:21 GMT", None),
+        ("not-a-date", None),
+    ],
+)
+def test_retry_after_http_dates_use_bounded_future_delays(monkeypatch, value, expected) -> None:
+    monkeypatch.setattr("aoe_linear_plugin.client.time.time", lambda: 1700000000.0)
+    transport = httpx.MockTransport(lambda _: httpx.Response(429, headers={"Retry-After": value}))
+    with LinearClient("token", transport=transport) as client, pytest.raises(LinearRateLimitError) as error:
+        client.execute("query { viewer { id } }")
+    assert error.value.retry_after == expected
+
+
+def test_rate_limit_delay_uses_exhausted_budget_reset_before_other_resets(monkeypatch) -> None:
+    monkeypatch.setattr("aoe_linear_plugin.client.time.time", lambda: 1700000000.0)
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(
+            429,
+            headers={
+                "X-RateLimit-Requests-Remaining": "4",
+                "X-RateLimit-Requests-Reset": "1700001000000",
+                "X-RateLimit-Endpoint-Requests-Remaining": "0",
+                "X-RateLimit-Endpoint-Requests-Reset": "1700000010000",
+                "X-RateLimit-Complexity-Remaining": "2",
+                "X-RateLimit-Complexity-Reset": "1700000500000",
+            },
+        )
+    )
+    with LinearClient("token", transport=transport) as client, pytest.raises(LinearRateLimitError) as error:
+        client.execute("query { viewer { id } }")
+    assert error.value.retry_after == 10.0
+
+
+def test_rate_limit_delay_falls_back_to_latest_reset_when_budget_unknown(monkeypatch) -> None:
+    monkeypatch.setattr("aoe_linear_plugin.client.time.time", lambda: 1700000000.0)
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(
+            429,
+            headers={
+                "X-RateLimit-Requests-Remaining": "3",
+                "X-RateLimit-Requests-Reset": "1700000010000",
+                "X-RateLimit-Endpoint-Requests-Reset": "1700000020000",
+            },
+        )
+    )
+    with LinearClient("token", transport=transport) as client, pytest.raises(LinearRateLimitError) as error:
+        client.execute("query { viewer { id } }")
+    assert error.value.retry_after == 20.0
+
+
 @pytest.mark.parametrize("status", [200, 400])
 def test_linear_graphql_rate_limit_uses_epoch_millisecond_reset(monkeypatch, status) -> None:
     monkeypatch.setattr("aoe_linear_plugin.client.time.time", lambda: 1700000000.0)

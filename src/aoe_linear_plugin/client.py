@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -110,12 +111,22 @@ def _retry_after(value: str | None) -> float | None:
     try:
         delay = float(value)
     except ValueError:
-        return None
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (OverflowError, TypeError, ValueError):
+            return None
+        if retry_at.tzinfo is None:
+            return None
+        delay = retry_at.timestamp() - time.time()
+        if not math.isfinite(delay) or delay <= 0 or delay > 3600.0:
+            return None
+        return delay
     return min(max(delay, 0.0), 3600.0) if math.isfinite(delay) else None
 
 
 def _rate_limit_delay(headers: httpx.Headers) -> float | None:
-    resets = []
+    resets: dict[str, float] = {}
+    exhausted: list[float] = []
     for budget in ("Requests", "Endpoint-Requests", "Complexity"):
         value = headers.get(f"X-RateLimit-{budget}-Reset")
         if value is None:
@@ -124,10 +135,21 @@ def _rate_limit_delay(headers: httpx.Headers) -> float | None:
             reset = float(value)
         except ValueError:
             continue
-        if math.isfinite(reset):
-            resets.append(reset)
-    if resets:
-        return min(max(max(resets) / 1000.0 - time.time(), 0.0), 3600.0)
+        if not math.isfinite(reset):
+            continue
+        resets[budget] = reset
+        remaining_value = headers.get(f"X-RateLimit-{budget}-Remaining")
+        if remaining_value is None:
+            continue
+        try:
+            remaining = float(remaining_value)
+        except ValueError:
+            continue
+        if math.isfinite(remaining) and remaining <= 0:
+            exhausted.append(reset)
+    candidates = exhausted or list(resets.values())
+    if candidates:
+        return min(max(max(candidates) / 1000.0 - time.time(), 0.0), 3600.0)
     return _retry_after(headers.get("Retry-After"))
 
 
