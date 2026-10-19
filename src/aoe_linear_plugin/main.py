@@ -50,6 +50,8 @@ def _response(request: Any) -> dict[str, Any] | None:
                 response = _error(-32601, str(exc), request_id)
             except ValueError as exc:
                 response = _error(-32602, str(exc), request_id)
+            except Exception:  # noqa: BLE001 — contain unexpected failures at the worker boundary
+                response = _error(-32603, "Internal error", request_id)
     return response
 
 

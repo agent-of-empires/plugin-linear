@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import webbrowser
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from aoe_linear_plugin import handlers
 from aoe_linear_plugin.main import _response, main
 
 
@@ -69,3 +71,29 @@ def test_worker_malformed_json_returns_parse_error(monkeypatch, capsys) -> None:
 
     response = json.loads(capsys.readouterr().out)
     assert response == {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
+
+
+@pytest.mark.parametrize("request_id", ["open-request", 8, None])
+def test_worker_browser_error_returns_internal_error_and_continues(monkeypatch, capsys, request_id) -> None:
+    issue = {"identifier": "ENG-1", "url": "https://linear.app/issue/ENG-1"}
+    monkeypatch.setattr(handlers, "linear_status", lambda *_args, **_kwargs: {"issues": [issue]})
+
+    def fail_browser(url: str) -> None:
+        raise webbrowser.Error("private browser configuration")
+
+    monkeypatch.setattr(webbrowser, "open", fail_browser)
+    requests = [
+        {"jsonrpc": "2.0", "method": "plugin.community.linear.open"},
+        {"jsonrpc": "2.0", "id": request_id, "method": "plugin.community.linear.open"},
+        {"jsonrpc": "2.0", "id": "next", "method": "session.open"},
+    ]
+    monkeypatch.setattr(sys, "stdin", iter(json.dumps(request) + "\n" for request in requests))
+
+    main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert [json.loads(line) for line in captured.out.splitlines()] == [
+        {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": "Internal error"}},
+        {"jsonrpc": "2.0", "id": "next", "error": {"code": -32601, "message": "Unknown method: session.open"}},
+    ]
