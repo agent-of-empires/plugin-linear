@@ -1,0 +1,29 @@
+id = "community.linear"
+name = "Linear"
+version = "0.1.0"
+api_version = 4
+aoe_version = ">=1.20.0, <2.0.0"
+description = "Resolve Linear issues linked to git branches and open their URLs."
+capabilities = ["runtime.worker", "net", "process.spawn", "fs.read", "browser_open"]
+
+[[commands]]
+id = "status"
+title = "Linear: status"
+description = "Resolve Linear issues for a checkout path."
+
+[[commands]]
+id = "open"
+title = "Linear: open issue"
+description = "Open the selected branch-linked issue in the browser."
+
+[runtime]
+kind = "command"
+command = [".aoe-build/venv/bin/aoe-linear-worker"]
+
+[[runtime.build]]
+command = ["python3", "-m", "venv", ".aoe-build/venv"]
+platforms = ["linux", "macos"]
+
+[[runtime.build]]
+command = [".aoe-build/venv/bin/pip", "install", "--no-warn-script-location", "."]
+platforms = ["linux", "macos"]
