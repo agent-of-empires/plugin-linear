@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -107,8 +108,6 @@ def _issue_rows(
 
 
 def _error_for(session: dict[str, Any]) -> dict[str, Any] | None:
-    if session.get("auth_error"):
-        return {"hint": session["auth_error"]}
     return next((repo.get("error") for repo in session.get("repos", []) if repo.get("error")), None)
 
 
@@ -149,7 +148,7 @@ def _resource_section(issue: dict[str, Any]) -> dict[str, Any] | None:
             "kind": "row",
             "label": link.get("title") or link["url"],
             "href": link["url"],
-            "sublabel": link.get("subtitle", ""),
+            "sublabel": link.get("subtitle") or "",
         }
         for link in links[:20]
     ]
@@ -192,15 +191,17 @@ def _comments_section(issue: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _stale_blocks(session: dict[str, Any], *, has_issues: bool) -> list[dict[str, Any]]:
-    if not session.get("stale") or not has_issues:
+    if not has_issues:
         return []
-    blocks: list[dict[str, Any]] = [
-        {
-            "kind": "note",
-            "text": "Showing cached Linear issue data; the latest refresh failed.",
-            "tone": "warn",
-        }
-    ]
+    blocks: list[dict[str, Any]] = []
+    if session.get("stale"):
+        blocks.append(
+            {
+                "kind": "note",
+                "text": "Showing cached Linear issue data; the latest refresh failed.",
+                "tone": "warn",
+            }
+        )
     error = _error_for(session)
     if error:
         blocks.append(
@@ -208,10 +209,55 @@ def _stale_blocks(session: dict[str, Any], *, has_issues: bool) -> list[dict[str
                 "kind": "callout",
                 "title": "Linear refresh failed",
                 "detail": error.get("hint", "Request failed"),
-                "tone": "warn",
+                "tone": "warn" if session.get("stale") else "danger",
             }
         )
     return blocks
+
+
+_PANE_PAYLOAD_BUDGET = 60 * 1024
+
+
+def _pane_size(pane: dict[str, Any]) -> int:
+    return len(json.dumps(pane, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _fit_pane(pane: dict[str, Any]) -> dict[str, Any]:
+    if _pane_size(pane) <= _PANE_PAYLOAD_BUDGET:
+        return pane
+
+    blocks = pane["blocks"]
+    comments = next((block for block in blocks if block.get("title") == "Comments"), None)
+    while comments and comments["children"] and _pane_size(pane) > _PANE_PAYLOAD_BUDGET:
+        comments["children"].pop(0)
+        comments["value"] = str(len(comments["children"]))
+    if comments and not comments["children"]:
+        blocks.remove(comments)
+
+    description = next((block for block in blocks if block.get("title") == "Description"), None)
+    if description and _pane_size(pane) > _PANE_PAYLOAD_BUDGET:
+        note = description["children"][0]
+        text = note["text"]
+        low, high = 0, len(text)
+        while low < high:
+            middle = (low + high + 1) // 2
+            note["text"] = text[:middle] + "…"
+            if _pane_size(pane) <= _PANE_PAYLOAD_BUDGET:
+                low = middle
+            else:
+                high = middle - 1
+        note["text"] = text[:low] + "…"
+        if _pane_size(pane) > _PANE_PAYLOAD_BUDGET:
+            blocks.remove(description)
+
+    if _pane_size(pane) <= _PANE_PAYLOAD_BUDGET:
+        return pane
+    return {
+        "title": "Linear",
+        "default_location": pane["default_location"],
+        "icon": pane["icon"],
+        "blocks": [{"kind": "note", "text": "Issue details omitted to fit the pane size limit.", "tone": "warn"}],
+    }
 
 
 def _pane(session: dict[str, Any], selected: str | None, *, show_priority: bool) -> dict[str, Any]:
@@ -237,7 +283,7 @@ def _pane(session: dict[str, Any], selected: str | None, *, show_priority: bool)
                     "tone": "neutral",
                 }
             )
-        return {"title": "Linear", "default_location": "right", "icon": "circle-dot", "blocks": blocks}
+        return _fit_pane({"title": "Linear", "default_location": "right", "icon": "circle-dot", "blocks": blocks})
 
     state = _state(chosen)
     icon, tone, color = _state_visual(chosen)
@@ -282,7 +328,7 @@ def _pane(session: dict[str, Any], selected: str | None, *, show_priority: bool)
     comments = _comments_section(chosen)
     if comments:
         blocks.append(comments)
-    return {"title": "Linear", "default_location": "right", "icon": "circle-dot", "blocks": blocks}
+    return _fit_pane({"title": "Linear", "default_location": "right", "icon": "circle-dot", "blocks": blocks})
 
 
 def _session_ui(
