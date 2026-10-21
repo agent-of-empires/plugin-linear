@@ -32,6 +32,53 @@ _STATE_VISUAL = {
     "canceled": ("circle-x", "neutral"),
 }
 
+_WORKFLOW_LABELS = {
+    "triage": "Triage",
+    "backlog": "Backlog",
+    "unstarted": "Unstarted",
+    "started": "Started",
+    "completed": "Completed",
+    "canceled": "Canceled",
+}
+FILTER_FACET_SLOT = "filter-facet"
+FILTER_FACETS: tuple[tuple[str, dict[str, Any]], ...] = (
+    (
+        "linear_workflow",
+        {
+            "label": "Linear workflow",
+            "column": ROW_COLUMN_SLOT[1],
+            "options": [
+                {"value": f"state:{state}", "label": label, "tone": _STATE_VISUAL.get(state, ("circle", "neutral"))[1]}
+                for state, label in _WORKFLOW_LABELS.items()
+            ],
+        },
+    ),
+    (
+        "linear_priority",
+        {
+            "label": "Linear priority",
+            "column": ROW_COLUMN_SLOT[1],
+            "options": [
+                {"value": f"priority:{priority}", "label": label}
+                for priority, label in {0: "No priority", **_PRIORITY}.items()
+            ],
+        },
+    ),
+)
+
+
+def _filter_values(issues: list[dict[str, Any]]) -> list[str]:
+    """Union issue facts across the workspace, independent of display selection."""
+    values: set[str] = set()
+    for issue in issues:
+        state = _state(issue).get("type")
+        if isinstance(state, str) and state in _WORKFLOW_LABELS:
+            values.add(f"state:{state}")
+        priority = issue.get("priority")
+        if isinstance(priority, int) and not isinstance(priority, bool) and 0 <= priority <= 4:
+            values.add(f"priority:{priority}")
+    return sorted(values)
+
 
 def _state_visual(issue: dict[str, Any]) -> tuple[str, str, str | None]:
     state = _state(issue)
@@ -317,6 +364,7 @@ def _session_ui(
             "tooltip": current.get("title", ""),
             "sort_value": _rank(current),
         }
+        column["filter_values"] = _filter_values(issues)
     else:
         error = _error_for(session)
         if error:
@@ -358,9 +406,12 @@ def session_payloads(
     *,
     show_priority: bool = True,
 ) -> list[dict[str, Any]]:
-    """Build per-session badge, status, and pane state plus a global sort key."""
+    """Build per-session UI state plus global sort and filter definitions."""
     selected = selected or {}
     result = [{"slot": SORT_KEY_SLOT[0], "id": SORT_KEY_SLOT[1], "payload": dict(SORT_KEY_PAYLOAD)}]
+    result.extend(
+        {"slot": FILTER_FACET_SLOT, "id": facet_id, "payload": payload} for facet_id, payload in FILTER_FACETS
+    )
     for session in snapshot.get("sessions", []):
         result.extend(_session_ui(session, selected, show_priority=show_priority))
     return result

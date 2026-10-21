@@ -61,6 +61,14 @@ slot = "row-column"
 id = "linear_issue_status"
 
 [[ui]]
+slot = "filter-facet"
+id = "linear_workflow"
+
+[[ui]]
+slot = "filter-facet"
+id = "linear_priority"
+
+[[ui]]
 slot = "sort-key"
 id = "linear_issue_attention"
 
