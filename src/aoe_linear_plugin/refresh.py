@@ -36,6 +36,27 @@ def _fetch_branch(
         return [], error
 
 
+def _fetch_branches(
+    client: LinearClient,
+    branches: list[str],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]], dict[str, Any] | None]:
+    issues_by_branch: dict[str, list[dict[str, Any]]] = {}
+    errors_by_branch: dict[str, dict[str, Any]] = {}
+    stop_error: dict[str, Any] | None = None
+    rate_limit: dict[str, Any] | None = None
+    for branch in branches:
+        issues, error = _fetch_branch(client, branch) if stop_error is None else ([], stop_error)
+        issues_by_branch[branch] = issues
+        if error is None:
+            continue
+        errors_by_branch[branch] = error
+        if error["kind"] in {"auth", "rate_limited"}:
+            stop_error = error
+        if error["kind"] == "rate_limited" and rate_limit is None:
+            rate_limit = error
+    return issues_by_branch, errors_by_branch, rate_limit
+
+
 def build_snapshot(
     sessions: list[dict[str, Any]],
     *,
@@ -59,25 +80,26 @@ def build_snapshot(
             session.get("id"): discover_checkouts(session, ignore_submodules=ignore_submodules) for session in sessions
         }
         unique = {(item["path"], item["branch"]) for checkouts in checkout_map.values() for item in checkouts}
+        branches = sorted({branch for _, branch in unique})
+        with LinearClient(token, transport=transport) as client:
+            branch_issues, branch_errors, rate_limit = _fetch_branches(client, branches)
+        if rate_limit:
+            _state["backoff_until"] = time.monotonic() + (rate_limit.get("retry_after") or 60.0)
         current: dict[tuple[str, str], list[dict[str, Any]]] = {}
         errors: dict[tuple[str, str], dict[str, Any]] = {}
         stale_keys: set[tuple[str, str]] = set()
-        rate_limit: dict[str, Any] | None = None
-        with LinearClient(token, transport=transport) as client:
-            for path, branch in sorted(unique):
-                key = (path, branch)
-                issues, error = ([], rate_limit) if rate_limit else _fetch_branch(client, branch)
-                if error:
-                    errors[key] = error
-                    previous = _previous_repo(_state["snapshot"], path, branch)
-                    if previous:
-                        issues = previous.get("issues", [])
-                        if issues:
-                            stale_keys.add(key)
-                    if error["kind"] == "rate_limited" and rate_limit is None:
-                        rate_limit = error
-                        _state["backoff_until"] = time.monotonic() + (error.get("retry_after") or 60.0)
-                current[key] = issues
+        for path, branch in sorted(unique):
+            key = (path, branch)
+            issues = branch_issues[branch]
+            error = branch_errors.get(branch)
+            if error:
+                errors[key] = error
+                previous = _previous_repo(_state["snapshot"], path, branch)
+                if previous:
+                    issues = previous.get("issues", [])
+                    if issues:
+                        stale_keys.add(key)
+            current[key] = issues
         output = _assemble_snapshot(sessions, checkout_map, current, errors, stale_keys)
         if rate_limit:
             output["rate_limited"] = True
@@ -137,6 +159,7 @@ def _empty_session(session: dict[str, Any], message: str, *, kind: str = "auth")
     return {
         "session_id": session.get("id"),
         "title": session.get("title", ""),
+        "project_path": session.get("project_path"),
         "repos": [{"issues": [], "error": {"kind": kind, "hint": message}}],
         "issues": [],
     }

@@ -54,6 +54,73 @@ def test_shared_checkout_is_queried_once_for_multiple_sessions(monkeypatch, tmp_
     assert [session["issues"][0]["identifier"] for session in snapshot["sessions"]] == ["ENG-7", "ENG-7"]
 
 
+def test_workspace_repos_sharing_branch_are_queried_once(monkeypatch, tmp_path: Path) -> None:
+    paths = [tmp_path / name for name in ("a", "b")]
+    for path in paths:
+        _checkout(path, "ENG-7-change")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+    requested = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requested.append(json.loads(request.content)["variables"]["branchName"])
+        return httpx.Response(
+            200,
+            json={"data": {"issueVcsBranchSearch": {"id": "i7", "identifier": "ENG-7", "title": "Task"}}},
+        )
+
+    session = {
+        "id": "s1",
+        "project_path": str(tmp_path),
+        "workspace_repos": [{"source_path": str(path), "branch": "ENG-7-change"} for path in paths],
+    }
+    snapshot = refresh.build_snapshot(
+        [session],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(respond),
+    )
+
+    assert requested == ["ENG-7-change"]
+    assert [[issue["identifier"] for issue in repo["issues"]] for repo in snapshot["sessions"][0]["repos"]] == [
+        ["ENG-7"],
+        ["ENG-7"],
+    ]
+
+
+def test_auth_failure_stops_later_branch_requests(monkeypatch, tmp_path: Path) -> None:
+    paths = [tmp_path / name for name in ("a", "b")]
+    for index, path in enumerate(paths, start=1):
+        _checkout(path, f"ENG-{index}")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+    requested = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requested.append(json.loads(request.content)["variables"]["branchName"])
+        return httpx.Response(401)
+
+    sessions = [{"id": str(index), "project_path": str(path)} for index, path in enumerate(paths)]
+    snapshot = refresh.build_snapshot(
+        sessions,
+        env={"LINEAR_API_KEY": "revoked"},
+        transport=httpx.MockTransport(respond),
+    )
+
+    assert requested == ["ENG-1"]
+    assert [session["repos"][0]["error"]["kind"] for session in snapshot["sessions"]] == ["auth", "auth"]
+
+
+def test_missing_credentials_preserve_project_path(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+    project_path = str(tmp_path)
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "title": "session title", "project_path": project_path}],
+        env={},
+    )
+
+    assert snapshot["sessions"][0]["project_path"] == project_path
+    assert snapshot["sessions"][0]["title"] == "session title"
+
+
 def test_http_failure_marks_last_good_issue_data_stale(monkeypatch, tmp_path: Path) -> None:
     _checkout(tmp_path, "ENG-1")
     previous = {
@@ -99,6 +166,31 @@ def test_http_rate_limit_sets_retry_backoff(monkeypatch, tmp_path: Path) -> None
     assert snapshot["rate_limited"] is True
     assert snapshot["sessions"][0]["repos"][0]["error"]["kind"] == "rate_limited"
     assert refresh._state["backoff_until"] > 0
+
+
+def test_linear_graphql_rate_limit_sets_reset_backoff(monkeypatch, tmp_path: Path) -> None:
+    _checkout(tmp_path, "ENG-1")
+    monkeypatch.setattr("aoe_linear_plugin.client.time.time", lambda: 1700000000.0)
+    monkeypatch.setattr(refresh.time, "monotonic", lambda: 1000.0)
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    def response(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            headers={"X-RateLimit-Requests-Reset": "1700000045000"},
+            json={"errors": [{"message": "Rate limited", "extensions": {"code": "RATELIMITED"}}]},
+        )
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(tmp_path)}],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(response),
+    )
+
+    assert snapshot["rate_limited"] is True
+    assert snapshot["sessions"][0]["repos"][0]["error"]["kind"] == "rate_limited"
+    assert snapshot["sessions"][0]["repos"][0]["error"]["retry_after"] == 45.0
+    assert refresh._state["backoff_until"] == 1045.0
 
 
 def test_http_failure_without_cached_issue_data_does_not_mark_snapshot_stale(monkeypatch, tmp_path: Path) -> None:
