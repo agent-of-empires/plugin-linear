@@ -11,7 +11,8 @@ def test_filter_facets_cover_linked_issue_workflow_and_priority() -> None:
                 "issues": [
                     {"identifier": "ENG-1", "priority": 1, "state": {"type": "started"}},
                     {"identifier": "ENG-2", "priority": 4, "state": {"type": "unstarted"}},
-                    {"identifier": "ENG-3", "priority": None, "state": {"type": "future"}},
+                    {"identifier": "ENG-3", "priority": 0, "state": {"type": "future"}},
+                    {"identifier": "ENG-4", "state": {"type": "completed"}},
                 ],
                 "repos": [],
             },
@@ -23,12 +24,29 @@ def test_filter_facets_cover_linked_issue_workflow_and_priority() -> None:
     assert [item["id"] for item in facets] == ["linear_workflow", "linear_priority"]
     assert facets[0]["payload"]["column"] == ROW_COLUMN_SLOT[1]
     assert facets[1]["payload"]["column"] == ROW_COLUMN_SLOT[1]
+    assert [option["value"] for option in facets[0]["payload"]["options"]] == [
+        "state:triage",
+        "state:backlog",
+        "state:unstarted",
+        "state:started",
+        "state:completed",
+        "state:canceled",
+    ]
+    assert [option["value"] for option in facets[1]["payload"]["options"]] == [
+        "priority:0",
+        "priority:1",
+        "priority:2",
+        "priority:3",
+        "priority:4",
+    ]
     columns = {
         item["session_id"]: item["payload"]["filter_values"]
         for item in payloads
         if item["slot"] == ROW_COLUMN_SLOT[0] and "filter_values" in item["payload"]
     }
-    assert columns == {"s1": ["priority:1", "priority:4", "state:started", "state:unstarted"]}
+    assert columns == {
+        "s1": ["priority:0", "priority:1", "priority:4", "state:completed", "state:started", "state:unstarted"]
+    }
 
 
 def test_session_ui_shows_linear_status_and_selectable_linked_issues() -> None:
