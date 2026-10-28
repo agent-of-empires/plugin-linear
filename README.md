@@ -7,17 +7,13 @@ The Linear plugin resolves issue state for session branches and displays it in t
 
 ## Install and authenticate
 
-Install from **Settings → Plugins → Discover** or:
-
-```sh
-aoe plugin install agent-of-empires/plugin-linear
-```
+AoE 1.20.0 or newer and Python 3.10+ are required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/`; `pip` access to package dependencies is required. Local source trees must not contain symlinks such as `.venv`.
 
 Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache. Authenticated read-only live verification passed on 2026-10-18.
 
-`agent-of-empires.linear` is in AoE's reserved namespace. The host requires an official featured-index pin before users can install it; that pin can only be generated for a released source tree. This implementation does not publish a release or modify AoE's featured index, so installation remains unavailable until that follow-up is approved and completed.
+The manifest uses the unverified community ID `community.linear`. There is no published release or tag yet, so `gh:agent-of-empires/plugin-linear` requires explicit consent (`--yes` or interactive confirmation) to fall back to the default branch. Linear is not in AoE's featured index; a featured entry is only needed for a reserved verified namespace or featured listing.
 
-The manifest prompts for `net`, `runtime.worker`, `session.read`, and `browser_open` capabilities. Build creates an isolated venv under `.aoe-build/`; the host launches `.aoe-build/venv/bin/aoe-linear-worker`.
+The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn`, `fs.read`, and `browser_open` capabilities. Build creates an isolated venv under `.aoe-build/`; the host launches `.aoe-build/venv/bin/aoe-linear-worker`.
 
 ## Features
 
@@ -28,6 +24,9 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, and `browser_o
 - Session refresh considers the session checkout and host-provided `workspace_repos`, deduplicates repeated issue records, and keeps prior UI state while sessions are unavailable.
 - The row badge links to the selected issue and shows its Linear workflow-state glyph; the status column shows only its workflow state; sorting ranks urgent/high/started issues ahead of completed issues.
 - Pane details include issue status, priority, team, assignee, project, cycle, description, up to 10 recent comments, and attached resources. The selected issue appears in the pane header; the selector lists only alternate issues. Attachments may include linked pull requests when Linear has attached them.
+- Session panes stay under the host's 64 KiB payload limit by dropping older comments, then truncating long descriptions when needed.
+
+The worker handles `linear.status` and `linear.refresh` requests and `linear.select_issue` pane actions. The `open` command is a host-side `open-ui-link` action; `plugin.community.linear.status` and `plugin.community.linear.open` route to the same issue handlers.
 
 ### GitHub plugin feature mapping
 
