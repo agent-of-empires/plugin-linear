@@ -1,4 +1,4 @@
-id = "agent-of-empires.linear"
+id = "community.linear"
 name = "Linear"
 version = "0.1.0"
 api_version = 19
@@ -7,7 +7,7 @@ aoe_version = ">=1.20.0, <2.0.0"
 description = "Linear issue status for Agent of Empires sessions and multi-checkout workspaces."
 icon = "circle-dot"
 icon_asset = "assets/linear-icon.png"
-capabilities = ["net", "runtime.worker", "session.read", "browser_open"]
+capabilities = ["runtime.worker", "net", "session.read", "process.spawn", "fs.read", "browser_open"]
 
 [[commands]]
 id = "status"
@@ -106,5 +106,5 @@ command = ["python3", "-m", "venv", ".aoe-build/venv"]
 platforms = ["linux", "macos"]
 
 [[runtime.build]]
-command = [".aoe-build/venv/bin/pip", "install", "."]
+command = [".aoe-build/venv/bin/pip", "install", "--no-warn-script-location", "."]
 platforms = ["linux", "macos"]

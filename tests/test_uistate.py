@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, ROW_COLUMN_SLOT, session_payloads
 
 
@@ -149,3 +153,84 @@ def test_empty_stale_error_does_not_claim_cached_data() -> None:
 
     assert [item["text"] for item in by_slot[ROW_BADGE_SLOT[0]]["items"]] == ["Linear error"]
     assert [block.get("title") for block in by_slot[PANE_SLOT[0]]["blocks"]] == ["Linear unavailable"]
+
+
+@pytest.mark.parametrize("character", ["日", "🙂", "\x01"])
+def test_pane_budget_keeps_newest_comments_with_multibyte_and_escaped_text(character: str) -> None:
+    issue = {
+        "identifier": "ENG-1",
+        "title": "Task",
+        "description": character * 4000,
+        "comments": {"nodes": [{"body": character * 2000, "user": {"name": f"Author {index}"}} for index in range(10)]},
+    }
+    pane = session_payloads({"sessions": [{"session_id": "s1", "issues": [issue]}]})[-1]["payload"]
+
+    assert len(json.dumps(pane, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 64 * 1024
+    comments = next(block for block in pane["blocks"] if block.get("title") == "Comments")
+    authors = [comment["author"] for comment in comments["children"]]
+    assert authors == [f"Author {index}" for index in range(10 - len(authors), 10)]
+    assert "Author 0" not in authors
+    assert authors[-1] == "Author 9"
+    assert comments["value"] == str(len(authors))
+    description = next(block for block in pane["blocks"] if block.get("title") == "Description")
+    assert description["children"][0]["text"] == issue["description"]
+    assert len(issue["comments"]["nodes"]) == 10
+
+
+def test_pane_budget_trims_description_after_removing_comments() -> None:
+    issue = {
+        "identifier": "ENG-1",
+        "title": "Task",
+        "description": "🙂" * 4000,
+        "attachments": {"nodes": [{"title": "x" * 3000, "url": "https://example.com"} for _ in range(15)]},
+        "comments": {"nodes": [{"body": "Newest comment", "user": {"name": "A User"}}]},
+    }
+    pane = session_payloads({"sessions": [{"session_id": "s1", "issues": [issue]}]})[-1]["payload"]
+
+    assert len(json.dumps(pane, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 64 * 1024
+    assert not any(block.get("title") == "Comments" for block in pane["blocks"])
+    description = next(block for block in pane["blocks"] if block.get("title") == "Description")
+    text = description["children"][0]["text"]
+    assert text.endswith("…")
+    assert issue["description"].startswith(text[:-1])
+    assert text != issue["description"]
+    resources = next(block for block in pane["blocks"] if block.get("title") == "Linked resources")
+    assert len(resources["children"]) == 15
+
+
+def test_pane_budget_also_bounds_oversized_issue_metadata() -> None:
+    issue = {"identifier": "ENG-1", "title": "🙂" * (64 * 1024)}
+    pane = session_payloads({"sessions": [{"session_id": "s1", "issues": [issue]}]})[-1]["payload"]
+
+    assert len(json.dumps(pane, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 64 * 1024
+    assert any("omitted" in block.get("text", "") for block in pane["blocks"])
+
+
+def test_partial_repo_failure_is_visible_without_claiming_cached_data() -> None:
+    snapshot = {
+        "sessions": [
+            {
+                "session_id": "s1",
+                "issues": [{"identifier": "ENG-1", "title": "Task"}],
+                "repos": [{"error": None}, {"error": {"hint": "Authentication failed"}}],
+                "stale": False,
+            }
+        ]
+    }
+    pane = session_payloads(snapshot)[-1]["payload"]
+
+    assert any(block.get("detail") == "Authentication failed" for block in pane["blocks"])
+    assert any(block.get("title", "").startswith("ENG-1") for block in pane["blocks"])
+    assert not any("cached" in block.get("text", "") for block in pane["blocks"])
+
+
+def test_attachment_with_null_subtitle_renders_without_a_null_label() -> None:
+    issue = {
+        "identifier": "ENG-1",
+        "attachments": {"nodes": [{"title": "PR", "url": "https://github.com/acme/repo/pull/1", "subtitle": None}]},
+    }
+    pane = session_payloads({"sessions": [{"session_id": "s1", "issues": [issue]}]})[-1]["payload"]
+    resources = next(block for block in pane["blocks"] if block.get("title") == "Linked resources")
+
+    assert resources["children"][0]["sublabel"] == ""
+    assert resources["children"][0]["href"] == "https://github.com/acme/repo/pull/1"

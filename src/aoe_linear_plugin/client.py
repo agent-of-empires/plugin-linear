@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
+import time
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -59,30 +62,14 @@ class LinearClient:
                 "Linear rejected the API key. Set LINEAR_API_KEY in the AoE daemon's environment and restart it."
             )
         if response.status_code == 429:
-            retry_after = _retry_after(response.headers.get("Retry-After"))
+            retry_after = _rate_limit_delay(response.headers)
             raise LinearRateLimitError(
                 "Linear rate limit reached; cached issue data is being shown.",
                 retry_after=retry_after,
             )
         if response.status_code >= 500:
             raise LinearNetworkError(f"Linear returned HTTP {response.status_code}; retry later.")
-        if response.status_code >= 400:
-            raise LinearNetworkError(f"Linear returned HTTP {response.status_code}; check the API request.")
-        try:
-            payload = response.json()
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise LinearNetworkError("Linear returned an invalid JSON response.") from exc
-        if not isinstance(payload, dict):
-            raise LinearNetworkError("Linear returned an invalid GraphQL response.")
-        errors = payload.get("errors")
-        if errors:
-            messages = [error.get("message", "GraphQL error") for error in errors if isinstance(error, dict)]
-            safe_message = "; ".join(str(message)[:200] for message in messages[:3]) or "GraphQL operation failed"
-            raise LinearGraphQLError(f"Linear GraphQL error: {safe_message}")
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            raise LinearGraphQLError("Linear returned no GraphQL data.")
-        return data
+        return _graphql_response_data(response)
 
     def issue_by_identifier(self, identifier: str) -> dict[str, Any] | None:
         query = f"query IssueByIdentifier($id: String!) {{ issue(id: $id) {{{ISSUE_FIELDS}}} }}"
@@ -98,10 +85,83 @@ class LinearClient:
         return issue if isinstance(issue, dict) else None
 
 
+def _graphql_response_data(response: httpx.Response) -> dict[str, Any]:
+    try:
+        payload = response.json()
+    except (json.JSONDecodeError, ValueError) as exc:
+        if response.status_code >= 400:
+            raise LinearNetworkError(f"Linear returned HTTP {response.status_code}; check the API request.") from exc
+        raise LinearNetworkError("Linear returned an invalid JSON response.") from exc
+    if not isinstance(payload, dict):
+        raise LinearNetworkError("Linear returned an invalid GraphQL response.")
+    errors = payload.get("errors")
+    if errors:
+        raise _graphql_error(errors, response.headers)
+    if response.status_code >= 400:
+        raise LinearNetworkError(f"Linear returned HTTP {response.status_code}; check the API request.")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise LinearGraphQLError("Linear returned no GraphQL data.")
+    return data
+
+
 def _retry_after(value: str | None) -> float | None:
     if value is None:
         return None
     try:
-        return min(max(float(value), 0.0), 3600.0)
+        delay = float(value)
     except ValueError:
-        return None
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (OverflowError, TypeError, ValueError):
+            return None
+        if retry_at.tzinfo is None:
+            return None
+        delay = retry_at.timestamp() - time.time()
+        if not math.isfinite(delay) or delay <= 0 or delay > 3600.0:
+            return None
+        return delay
+    return min(max(delay, 0.0), 3600.0) if math.isfinite(delay) else None
+
+
+def _rate_limit_delay(headers: httpx.Headers) -> float | None:
+    resets: dict[str, float] = {}
+    exhausted: list[float] = []
+    for budget in ("Requests", "Endpoint-Requests", "Complexity"):
+        value = headers.get(f"X-RateLimit-{budget}-Reset")
+        if value is None:
+            continue
+        try:
+            reset = float(value)
+        except ValueError:
+            continue
+        if not math.isfinite(reset):
+            continue
+        resets[budget] = reset
+        remaining_value = headers.get(f"X-RateLimit-{budget}-Remaining")
+        if remaining_value is None:
+            continue
+        try:
+            remaining = float(remaining_value)
+        except ValueError:
+            continue
+        if math.isfinite(remaining) and remaining <= 0:
+            exhausted.append(reset)
+    candidates = exhausted or list(resets.values())
+    if candidates:
+        return min(max(max(candidates) / 1000.0 - time.time(), 0.0), 3600.0)
+    return _retry_after(headers.get("Retry-After"))
+
+
+def _graphql_error(errors: Any, headers: httpx.Headers) -> LinearGraphQLError | LinearRateLimitError:
+    items = [error for error in errors if isinstance(error, dict)] if isinstance(errors, list) else []
+    for error in items:
+        extensions = error.get("extensions")
+        if isinstance(extensions, dict) and extensions.get("code") == "RATELIMITED":
+            return LinearRateLimitError(
+                "Linear rate limit reached; cached issue data is being shown.",
+                retry_after=_rate_limit_delay(headers),
+            )
+    messages = [str(error.get("message", "GraphQL error"))[:200] for error in items[:3]]
+    safe_message = "; ".join(messages) or "GraphQL operation failed"
+    return LinearGraphQLError(f"Linear GraphQL error: {safe_message}")

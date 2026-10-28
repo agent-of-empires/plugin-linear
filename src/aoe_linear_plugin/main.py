@@ -152,6 +152,16 @@ class Runtime:
             self.send({"jsonrpc": "2.0", "id": next(_ids), "method": method, "params": params})
 
     def _command_result(self, method: str, params: dict[str, Any]) -> Any:
+        if method in ("plugin.community.linear.status", "plugin.community.linear.open"):
+            if not isinstance(params, dict) or set(params) - {"path", "selected"}:
+                raise ValueError("Unknown parameter")
+            path = params.get("path", ".")
+            selected = params.get("selected")
+            if not isinstance(path, str) or (selected is not None and not isinstance(selected, str)):
+                raise ValueError("path and selected must be strings")
+            if method == "plugin.community.linear.status":
+                return linear_status(path, selected=selected)
+            return linear_open(path, selected=selected, open_browser=True)
         if method == "linear.status":
             return linear_status(_path(params), selected=params.get("issue"))
         if method == "linear.open":
@@ -177,7 +187,15 @@ class Runtime:
         params = message.get("params") or {}
         msg_id = message.get("id")
         try:
-            if method not in ("linear.status", "linear.open", "linear.refresh", "suggestions.refresh", SELECT_METHOD):
+            if method not in (
+                "linear.status",
+                "linear.open",
+                "linear.refresh",
+                "suggestions.refresh",
+                SELECT_METHOD,
+                "plugin.community.linear.status",
+                "plugin.community.linear.open",
+            ):
                 if isinstance(msg_id, int):
                     self.send(_error(msg_id, "method_not_found", f"Unknown method: {method}"))
                 return
