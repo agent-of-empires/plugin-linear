@@ -9,7 +9,7 @@ The Linear plugin resolves issue state for session branches and displays it in t
 
 AoE 1.20.0 or newer and Python 3.10+ are required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/`; `pip` access to package dependencies is required. Local source trees must not contain symlinks such as `.venv`.
 
-Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache. Authenticated read-only live verification passed on 2026-10-18.
+Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache.
 
 The manifest uses the unverified community ID `community.linear`. There is no published release or tag yet, so `gh:agent-of-empires/plugin-linear` requires explicit consent (`--yes` or interactive confirmation) to fall back to the default branch. Linear is not in AoE's featured index; a featured entry is only needed for a reserved verified namespace or featured listing.
 
@@ -18,7 +18,7 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn
 ## Features
 
 - `Linear: status` returns the branch and its linked issues, with actionable auth/network/GraphQL errors.
-- `Linear: refresh` schedules an update of all active session panes in the worker's outer loop; the plugin polls at the configurable interval (default 120 seconds, `0` disables polling). Each refresh reuses one HTTP client. A rate limit stops remaining requests, retains completed results, and uses last-good state during the `Retry-After` cooldown.
+- `Linear: refresh` schedules an update of all active session panes in the worker's outer loop; the plugin polls at the configurable interval (default 120 seconds, `0` disables polling). Each refresh reuses one HTTP client. A rate limit stops remaining requests, retains completed results, and uses last-good state until the advertised reset time.
 - `Linear: open issue` opens the issue currently shown on the session row.
 - Branch resolution combines Linear's issue `branchName` metadata with up to five distinct issue identifiers embedded in branch names (for example `feature/ENG-123-add-cache`). A failed speculative GraphQL lookup (such as `UTF-8` in a branch name) does not discard other matches. Authentication, transport, and rate-limit failures remain visible. Multiple matches are shown in the pane; the selected issue can be changed there.
 - Session refresh considers the session checkout and host-provided `workspace_repos`, deduplicates repeated issue records, and keeps prior UI state while sessions are unavailable.
@@ -26,7 +26,7 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn
 - Pane details include issue status, priority, team, assignee, project, cycle, description, up to 10 recent comments, and attached resources. The selected issue appears in the pane header; the selector lists only alternate issues. Attachments may include linked pull requests when Linear has attached them.
 - Session panes stay under the host's 64 KiB payload limit by dropping older comments, then truncating long descriptions when needed.
 
-The worker handles `linear.status` and `linear.refresh` requests and `linear.select_issue` pane actions. The `open` command is a host-side `open-ui-link` action; `plugin.community.linear.status` and `plugin.community.linear.open` route to the same issue handlers.
+The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.community.linear.status`, `plugin.community.linear.open`, and `plugin.community.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
 
 ### GitHub plugin feature mapping
 
@@ -58,7 +58,7 @@ Worker-host smoke test, including an interleaved refresh during startup, a malfo
 uv run pytest tests/test_main.py::test_worker_host_smoke_answers_startup_rpcs_and_status
 ```
 
-Issue lookups use Linear GraphQL at `https://api.linear.app/graphql`. HTTP 429 responses honor `Retry-After` and background polling serves last-good data during the backoff. Missing credentials are reported as an actionable auth state; there is no fabricated data fallback.
+Issue lookups use Linear GraphQL at `https://api.linear.app/graphql`. Linear reports rate limits as HTTP 400 with `extensions.code == "RATELIMITED"` and no `Retry-After` header; the client then serves last-good data until the advertised reset time in the `X-RateLimit-*` headers. Missing credentials are reported as an actionable auth state; there is no fabricated data fallback.
 
 ### Live verification and remaining release gates
 

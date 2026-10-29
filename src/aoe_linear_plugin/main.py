@@ -67,11 +67,13 @@ class Runtime:
             self.stdout.flush()
 
     def _read(self) -> None:
-        for raw in self.stdin:
-            message = _parse_message(raw)
-            if message is not None:
-                self.inbox.put(message)
-        self.inbox.put(EOF)
+        try:
+            for raw in self.stdin:
+                message = _parse_message(raw)
+                if message is not None:
+                    self.inbox.put(message)
+        finally:
+            self.inbox.put(EOF)
 
     def call_host(self, method: str, params: dict[str, Any], timeout: float = RPC_TIMEOUT) -> Any:
         request_id = next(_ids)
@@ -139,14 +141,14 @@ class Runtime:
             return linear_open(path, selected=selected, open_browser=True)
         if method == "linear.status":
             return linear_status(_path(params), selected=params.get("issue"))
-        if method == "linear.open":
+        if method in ("linear.open", "plugin.community.linear.open"):
             return linear_open(_path(params), selected=params.get("issue"))
-        if method in ("linear.refresh", SELECT_METHOD):
+        if method in ("linear.refresh", "plugin.community.linear.refresh", SELECT_METHOD):
             return {"accepted": True}
         raise LookupError(method)
 
     def _after_command(self, method: str, params: dict[str, Any]) -> None:
-        if method == "linear.refresh":
+        if method in ("linear.refresh", "plugin.community.linear.refresh"):
             self.refresh_due = True
         elif method == SELECT_METHOD:
             sid = params.get("session_id")
@@ -169,6 +171,7 @@ class Runtime:
                 SELECT_METHOD,
                 "plugin.community.linear.status",
                 "plugin.community.linear.open",
+                "plugin.community.linear.refresh",
             ):
                 if isinstance(msg_id, int):
                     self.send(_error(msg_id, "method_not_found", f"Unknown method: {method}"))
@@ -179,7 +182,7 @@ class Runtime:
             if isinstance(msg_id, int):
                 self.send(_error(msg_id, getattr(exc, "kind", "invalid_request"), str(exc)))
             return
-        except Exception:  # noqa: BLE001 — isolate malformed requests and unexpected repaint failures.
+        except Exception:  # noqa: BLE001  isolate malformed requests and unexpected repaint failures.
             if isinstance(msg_id, int):
                 self.send(_error(msg_id, "internal_error", "Linear command failed unexpectedly."))
             return
@@ -211,8 +214,8 @@ class Runtime:
         self.refresh_due = False
         try:
             self.refresh()
-        except Exception:  # noqa: BLE001 — one failed poll must not terminate the worker.
-            sys.stderr.write("Linear refresh failed unexpectedly.\n")
+        except Exception as exc:  # noqa: BLE001  one failed poll must not terminate the worker.
+            sys.stderr.write(f"Linear refresh failed unexpectedly ({type(exc).__name__}).\n")
         finally:
             self.next_refresh = time.monotonic() + self.interval if self.interval else float("inf")
 
