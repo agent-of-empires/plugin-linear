@@ -18,4 +18,4 @@ The manifest uses the unverified community ID `community.linear`. There is no pu
 
 ## Commands
 
-The worker protocol exposes `status` and `open` commands with optional `path` (default `.`) and `selected` issue identifier parameters. `status` returns branch-linked issue state; `open` resolves and opens the issue URL in the browser. These are worker commands only: AoE 1.20.0 does not yet dispatch manifest command contributions to workers from its CLI or palette.
+The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.community.linear.status`, `plugin.community.linear.open`, and `plugin.community.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
