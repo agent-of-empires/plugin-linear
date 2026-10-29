@@ -66,7 +66,7 @@
           "message": "Entity not found: Issue",
           "path": ["redacted"],
           "locations": [{"line": 1, "column": 41}],
-          "extensions": {"type": "redacted", "code": "INVALID_INPUT", "statusCode": 400, "userError": true, "userPresentableMessage": "redacted"}
+          "extensions": {"type": "redacted", "code": "redacted", "statusCode": 400, "userError": true, "userPresentableMessage": "redacted"}
         }],
         "data": null
       }
