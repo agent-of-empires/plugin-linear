@@ -70,6 +70,19 @@
         }],
         "data": null
       }
+    },
+    "rate_limited": {
+      "operation": "IssueByIdentifier",
+      "http_status": 400,
+      "body": {
+        "errors": [{
+          "message": "Rate limit exceeded",
+          "path": ["redacted"],
+          "locations": [{"line": 1, "column": 1}],
+          "extensions": {"type": "RATE_LIMITED", "code": "RATELIMITED", "statusCode": 400, "userError": true, "userPresentableMessage": "Rate limit exceeded"}
+        }],
+        "data": null
+      }
     }
   }
 }
