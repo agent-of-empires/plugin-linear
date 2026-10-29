@@ -10,6 +10,13 @@ Links Linear issues to Agent of Empires sessions, showing workflow status, issue
 - Shows an unavailable state when a refresh fails before any issue data is cached.
 - Keeps session panes under the host's 64 KiB payload limit by dropping older comments, then truncating long descriptions when needed.
 
+The session row exposes Linear workflow and priority as filter facets for the dashboard and Kanban Board. Facet values include every linked issue in that session, not only the selected issue; refreshes with cached issue data keep those values. The filter contract:
+
+| Facet id | Label | Column | Values |
+|---|---|---|---|
+| `linear_workflow` | Linear workflow | `linear_issue_status` | `state:triage`, `state:backlog`, `state:unstarted`, `state:started`, `state:completed`, `state:canceled` |
+| `linear_priority` | Linear priority | `linear_issue_status` | `priority:0` (No priority) through `priority:4` (Low) |
+
 ## Install from source
 
 AoE 1.20.0 or newer is required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/` during installation. Python 3.10+ and `pip` access to the package dependencies are required. For a local install, use a clean source tree (no `.venv` or other symlinks); the AoE installer rejects symlinks in local plugin sources.
