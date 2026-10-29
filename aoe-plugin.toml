@@ -1,7 +1,7 @@
 id = "community.linear"
 name = "Linear"
 version = "0.1.0"
-api_version = 4
+api_version = 7
 aoe_version = ">=1.20.0, <2.0.0"
 description = "Resolve Linear issues linked to git branches and open their URLs."
 icon = "circle-dot"

@@ -4,6 +4,7 @@ import io
 import itertools
 import json
 import os
+import selectors
 import subprocess
 import sys
 from pathlib import Path
@@ -31,33 +32,75 @@ def test_worker_status_request_returns_actionable_auth_error(tmp_path: Path, mon
 
 
 def test_worker_host_smoke_answers_startup_rpcs_and_status(tmp_path: Path) -> None:
+    """Stream against the real worker so startup replies cannot be dropped as an input race."""
     subprocess.run(["git", "init", "-b", "ENG-8-fix", str(tmp_path)], check=True, capture_output=True)
-    host_messages = [
-        {"jsonrpc": "2.0", "id": 41, "method": "linear.refresh"},
-        {"jsonrpc": "2.0", "id": 43, "method": "linear.status", "params": {"args": "oops"}},
-        {"jsonrpc": "2.0", "id": 1_000_000, "result": {"value": 0}},
-        {"jsonrpc": "2.0", "id": 1_000_001, "result": {"value": True}},
-        {"jsonrpc": "2.0", "id": 1_000_002, "result": {"value": True}},
-        {"jsonrpc": "2.0", "id": 1_000_003, "result": {"sessions": []}},
-        {
-            "jsonrpc": "2.0",
-            "id": 42,
-            "method": "linear.status",
-            "params": {"args": {"path": str(tmp_path)}},
-        },
-    ]
-    input_data = "\n".join(json.dumps(message) for message in host_messages) + "\n"
     environment = {key: value for key, value in os.environ.items() if key not in {"LINEAR_API_KEY", "LINEAR_TOKEN"}}
-    process = subprocess.run(
-        [sys.executable, "-m", "aoe_linear_plugin.main"],
-        input=input_data,
-        text=True,
-        capture_output=True,
-        env=environment,
-        check=True,
-        timeout=10,
-    )
-    output = [json.loads(line) for line in process.stdout.splitlines()]
+    output = []
+    with (
+        subprocess.Popen(
+            [sys.executable, "-m", "aoe_linear_plugin.main"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+            env=environment,
+        ) as process,
+        selectors.DefaultSelector() as selector,
+    ):
+        assert process.stdin is not None
+        assert process.stdout is not None
+        selector.register(process.stdout, selectors.EVENT_READ)
+        try:
+            for message in (
+                {"jsonrpc": "2.0", "id": 41, "method": "linear.refresh"},
+                {"jsonrpc": "2.0", "id": 43, "method": "linear.status", "params": {"args": "oops"}},
+            ):
+                process.stdin.write((json.dumps(message) + "\n").encode())
+            process.stdin.flush()
+            for _ in range(100):
+                assert selector.select(timeout=10), "Worker stopped responding"
+                message = json.loads(process.stdout.readline())
+                output.append(message)
+                method = message.get("method")
+                if method == "config.get":
+                    key = message["params"]["key"]
+                    value = {"ui_refresh_secs": 0, "ignore_submodules": True, "show_priority": True}.get(key, "")
+                    result = {"value": value}
+                elif method == "sessions.list":
+                    result = {"sessions": [{"id": "s1", "project_path": str(tmp_path)}]}
+                else:
+                    if {41, 42, 43} <= {item.get("id") for item in output} and any(
+                        item.get("method") == "ui.state.set" and item["params"]["slot"] == "pane" for item in output
+                    ):
+                        break
+                    continue
+                response = {"jsonrpc": "2.0", "id": message["id"], "result": result}
+                process.stdin.write((json.dumps(response) + "\n").encode())
+                if method == "sessions.list":
+                    process.stdin.write(
+                        (
+                            json.dumps(
+                                {
+                                    "jsonrpc": "2.0",
+                                    "id": 42,
+                                    "method": "linear.status",
+                                    "params": {"args": {"path": str(tmp_path)}},
+                                }
+                            )
+                            + "\n"
+                        ).encode()
+                    )
+                process.stdin.flush()
+            else:
+                pytest.fail("Worker did not finish startup and status requests")
+        finally:
+            process.stdin.close()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        assert process.returncode == 0
     status = next(message["result"] for message in output if message.get("id") == 42)
     assert status["branch"] == "ENG-8-fix"
     assert status["error"]["kind"] == "auth"

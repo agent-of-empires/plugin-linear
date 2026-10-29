@@ -18,4 +18,4 @@ The manifest uses the unverified community ID `community.linear`. There is no pu
 
 ## Commands
 
-The worker handles `linear.status` and `linear.refresh` requests and `linear.select_issue` pane actions. The `open` command is a host-side `open-ui-link` action for the selected issue; the worker also routes the `plugin.community.linear.status` and `plugin.community.linear.open` names to the same issue handlers.
+The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.community.linear.status`, `plugin.community.linear.open`, and `plugin.community.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
