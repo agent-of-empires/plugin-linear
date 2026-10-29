@@ -34,6 +34,7 @@ def test_worker_status_request_returns_actionable_auth_error(tmp_path: Path, mon
 
 
 def test_worker_host_smoke_answers_startup_rpcs_and_status(tmp_path: Path) -> None:
+    """Stream against the real worker so startup replies cannot be dropped as an input race."""
     subprocess.run(["git", "init", "-b", "ENG-8-fix", str(tmp_path)], check=True, capture_output=True)
     environment = {key: value for key, value in os.environ.items() if key not in {"LINEAR_API_KEY", "LINEAR_TOKEN"}}
     output = []
