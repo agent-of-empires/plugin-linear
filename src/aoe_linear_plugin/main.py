@@ -22,6 +22,10 @@ EOF = object()
 _ids = itertools.count(1_000_000)
 
 
+class UnknownMethodError(Exception):
+    """No worker handler is registered for the requested method."""
+
+
 def _parse_message(raw: str) -> dict[str, Any] | None:
     try:
         value = json.loads(raw)
@@ -145,7 +149,7 @@ class Runtime:
             return linear_open(_path(params), selected=params.get("issue"))
         if method in ("linear.refresh", "plugin.community.linear.refresh", SELECT_METHOD):
             return {"accepted": True}
-        raise LookupError(method)
+        raise UnknownMethodError(method)
 
     def _after_command(self, method: str, params: dict[str, Any]) -> None:
         if method in ("linear.refresh", "plugin.community.linear.refresh"):
@@ -164,20 +168,12 @@ class Runtime:
         params = message.get("params") or {}
         msg_id = message.get("id")
         try:
-            if method not in (
-                "linear.status",
-                "linear.open",
-                "linear.refresh",
-                SELECT_METHOD,
-                "plugin.community.linear.status",
-                "plugin.community.linear.open",
-                "plugin.community.linear.refresh",
-            ):
-                if isinstance(msg_id, int):
-                    self.send(_error(msg_id, "method_not_found", f"Unknown method: {method}"))
-                return
             result = self._command_result(method, params)
             self._after_command(method, params)
+        except UnknownMethodError:
+            if isinstance(msg_id, int):
+                self.send(_error(msg_id, "method_not_found", f"Unknown method: {method}"))
+            return
         except (LinearError, ValueError) as exc:
             if isinstance(msg_id, int):
                 self.send(_error(msg_id, getattr(exc, "kind", "invalid_request"), str(exc)))
