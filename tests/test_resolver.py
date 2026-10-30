@@ -7,13 +7,21 @@ import pytest
 
 from aoe_linear_plugin.client import LinearClient
 from aoe_linear_plugin.errors import LinearGraphQLError, LinearRateLimitError
-from aoe_linear_plugin.resolver import identifiers_in_branch, resolve_branch, selected_issue
+from aoe_linear_plugin.resolver import branch_is_linear, identifiers_in_branch, resolve_branch, selected_issue
 
 
 def test_branch_identifiers_are_normalized_deduplicated_and_bounded() -> None:
     assert identifiers_in_branch("feature/eng-12-add-eng-12-and-OPS-4x") == ["ENG-12"]
     assert identifiers_in_branch("fix/OPS-4-more") == ["OPS-4"]
     assert identifiers_in_branch("fix/ENG-0") == []
+
+
+def test_dependency_branches_are_not_treated_as_linear_work() -> None:
+    assert branch_is_linear("feature/ENG-12-add-work") is True
+    assert branch_is_linear("eng-12-fix") is True
+    assert branch_is_linear("dependabot/pip/httpx-0.27.0") is False
+    assert branch_is_linear("renovate/major-react-monorepo") is False
+    assert branch_is_linear("main") is False
 
 
 def test_resolve_branch_combines_branch_metadata_and_identifiers() -> None:

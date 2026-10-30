@@ -14,7 +14,9 @@ from aoe_linear_plugin.auth import resolve_token
 from aoe_linear_plugin.client import LinearClient
 from aoe_linear_plugin.discovery import discover_checkouts
 from aoe_linear_plugin.errors import LinearError
-from aoe_linear_plugin.resolver import resolve_branch
+from aoe_linear_plugin.resolver import branch_is_linear, resolve_branch
+
+AUTH_HINT = "Set LINEAR_API_KEY to load Linear issue data."
 
 _lock = threading.Lock()
 _state: dict[str, Any] = {
@@ -69,16 +71,11 @@ def build_snapshot(
     with _lock:
         if time.monotonic() < _state["backoff_until"]:
             return _stale_snapshot(_state["snapshot"], sessions)
-        if token is None:
-            return {
-                "sessions": [
-                    _empty_session(session, "Set LINEAR_API_KEY to load Linear issue data.") for session in sessions
-                ],
-                "auth": {"present": False},
-            }
         checkout_map = {
             session.get("id"): discover_checkouts(session, ignore_submodules=ignore_submodules) for session in sessions
         }
+        if token is None:
+            return _auth_snapshot(sessions, checkout_map)
         unique = {(item["path"], item["branch"]) for checkouts in checkout_map.values() for item in checkouts}
         branches = sorted({branch for _, branch in unique})
         with LinearClient(token, transport=transport) as client:
@@ -93,18 +90,60 @@ def build_snapshot(
             issues = branch_issues[branch]
             error = branch_errors.get(branch)
             if error:
-                errors[key] = error
                 previous = _previous_repo(_state["snapshot"], path, branch)
-                if previous:
-                    issues = previous.get("issues", [])
-                    if issues:
-                        stale_keys.add(key)
+                cached = (previous or {}).get("issues", [])
+                if cached:
+                    issues = cached
+                    stale_keys.add(key)
             current[key] = issues
+            # A checkout with no Linear link stays quiet: an auth or transport failure there
+            # says nothing about the user's work, and the GitHub plugin already owns that row.
+            if error and _repo_linked(branch, issues):
+                errors[key] = error
         output = _assemble_snapshot(sessions, checkout_map, current, errors, stale_keys)
         if rate_limit:
             output["rate_limited"] = True
         _state["snapshot"] = output
         return output
+
+
+def _repo_linked(branch: str, issues: list[dict[str, Any]]) -> bool:
+    """Whether this checkout is known or likely to be tracked in Linear."""
+    return bool(issues) or branch_is_linear(branch)
+
+
+def _session_entry(session: dict[str, Any], repos: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "session_id": session.get("id"),
+        "title": session.get("title", ""),
+        "project_path": session.get("project_path"),
+        "repos": repos,
+        "issues": [],
+        "linked": any(repo.get("linked") for repo in repos),
+    }
+
+
+def _auth_snapshot(
+    sessions: list[dict[str, Any]],
+    checkout_map: dict[Any, list[dict[str, str]]],
+) -> dict[str, Any]:
+    """Report missing credentials only where a branch actually names a Linear issue."""
+    output = []
+    for session in sessions:
+        repos: list[dict[str, Any]] = []
+        for checkout in checkout_map.get(session.get("id"), []):
+            linked = branch_is_linear(checkout["branch"])
+            repos.append(
+                {
+                    **checkout,
+                    "name": Path(checkout["path"]).name,
+                    "issues": [],
+                    "linked": linked,
+                    "error": {"kind": "auth", "hint": AUTH_HINT} if linked else None,
+                }
+            )
+        output.append(_session_entry(session, repos))
+    return {"sessions": output, "auth": {"present": False}}
 
 
 def _assemble_snapshot(
@@ -131,19 +170,15 @@ def _assemble_snapshot(
                     **checkout,
                     "name": Path(checkout["path"]).name,
                     "issues": issues,
+                    "linked": _repo_linked(checkout["branch"], issues),
                     "error": errors.get(key),
                 }
             )
-        output.append(
-            {
-                "session_id": session.get("id"),
-                "title": session.get("title", ""),
-                "project_path": session.get("project_path"),
-                "repos": repos,
-                "issues": sorted(issues_by_id.values(), key=lambda issue: issue.get("identifier", "")),
-                **({"stale": True} if session_keys & stale_keys else {}),
-            }
-        )
+        entry = _session_entry(session, repos)
+        entry["issues"] = sorted(issues_by_id.values(), key=lambda issue: issue.get("identifier", ""))
+        if session_keys & stale_keys:
+            entry["stale"] = True
+        output.append(entry)
     return {"sessions": output, "auth": {"present": True}}
 
 
@@ -155,23 +190,13 @@ def _previous_repo(snapshot: dict[str, Any], path: str, branch: str) -> dict[str
     return None
 
 
-def _empty_session(session: dict[str, Any], message: str, *, kind: str = "auth") -> dict[str, Any]:
-    return {
-        "session_id": session.get("id"),
-        "title": session.get("title", ""),
-        "project_path": session.get("project_path"),
-        "repos": [{"issues": [], "error": {"kind": kind, "hint": message}}],
-        "issues": [],
-    }
-
-
 def _stale_snapshot(cached: dict[str, Any], sessions: list[dict[str, Any]]) -> dict[str, Any]:
     old = {item.get("session_id"): item for item in cached.get("sessions", [])}
     results = []
     for session in sessions:
         prior = old.get(session.get("id"))
         if prior:
-            stale = {**prior}
+            stale = {**prior, "linked": bool(prior.get("linked")) or bool(prior.get("issues"))}
             if prior.get("issues"):
                 stale["stale"] = True
             else:
@@ -180,14 +205,15 @@ def _stale_snapshot(cached: dict[str, Any], sessions: list[dict[str, Any]]) -> d
                     stale["repos"] = [
                         {
                             **repo,
-                            "error": {
-                                "kind": "rate_limited",
-                                "hint": "Linear rate limit active; refresh will retry later.",
-                            },
+                            "error": (
+                                {"kind": "rate_limited", "hint": "Linear rate limit active; refresh will retry later."}
+                                if repo.get("linked") or repo.get("issues")
+                                else None
+                            ),
                         }
                         for repo in stale["repos"]
                     ]
         else:
-            stale = _empty_session(session, "Linear rate limit active; refresh will retry later.", kind="rate_limited")
+            stale = _session_entry(session, [])
         results.append(stale)
     return {"sessions": results, "auth": cached.get("auth", {"present": True}), "rate_limited": True}

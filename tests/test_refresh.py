@@ -214,7 +214,9 @@ def test_http_failure_without_cached_issue_data_does_not_mark_snapshot_stale(mon
 
     session = snapshot["sessions"][0]
     assert session.get("stale") is None
-    assert session["repos"][0]["error"]["kind"] == "network"
+    # The branch names no Linear issue, so the failure is not the user's problem to see.
+    assert session["linked"] is False
+    assert session["repos"][0]["error"] is None
 
 
 def test_rate_limit_without_cached_issue_data_does_not_mark_snapshot_stale(monkeypatch, tmp_path: Path) -> None:
@@ -232,11 +234,73 @@ def test_rate_limit_without_cached_issue_data_does_not_mark_snapshot_stale(monke
     snapshot = refresh.build_snapshot([{"id": "s1", "project_path": str(tmp_path)}], env={})
 
     assert snapshot["sessions"][0].get("stale") is None
-    assert snapshot["sessions"][0]["repos"][0]["error"] == {
-        "kind": "rate_limited",
-        "hint": "Linear rate limit active; refresh will retry later.",
-    }
+    assert snapshot["sessions"][0]["linked"] is False
+    assert snapshot["sessions"][0]["repos"][0]["error"] is None
     assert snapshot["rate_limited"] is True
+
+
+def test_missing_credentials_are_reported_only_for_linear_branches(monkeypatch, tmp_path: Path) -> None:
+    linear = tmp_path / "linear"
+    other = tmp_path / "other"
+    _checkout(linear, "ENG-12-change")
+    _checkout(other, "main")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(linear)}, {"id": "s2", "project_path": str(other)}],
+        env={},
+    )
+
+    sessions = {session["session_id"]: session for session in snapshot["sessions"]}
+    assert sessions["s1"]["linked"] is True
+    assert sessions["s1"]["repos"][0]["error"]["kind"] == "auth"
+    assert sessions["s2"]["linked"] is False
+    assert sessions["s2"]["repos"][0]["error"] is None
+
+
+def test_unlinked_branch_that_fails_to_look_up_stays_quiet(monkeypatch, tmp_path: Path) -> None:
+    _checkout(tmp_path, "main")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(tmp_path)}],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(lambda _: httpx.Response(503)),
+    )
+
+    session = snapshot["sessions"][0]
+    assert session["linked"] is False
+    assert session["repos"][0]["error"] is None
+    assert session.get("stale") is None
+
+
+def test_unlinked_repo_does_not_mask_a_linked_repo_failure(monkeypatch, tmp_path: Path) -> None:
+    linear = tmp_path / "linear"
+    other = tmp_path / "other"
+    _checkout(linear, "ENG-12-change")
+    _checkout(other, "main")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    def respond(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    session = {
+        "id": "s1",
+        "project_path": str(linear),
+        "workspace_repos": [
+            {"source_path": str(linear), "branch": "ENG-12-change"},
+            {"source_path": str(other), "branch": "main"},
+        ],
+    }
+    snapshot = refresh.build_snapshot(
+        [session],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(respond),
+    )
+
+    repos = {repo["branch"]: repo for repo in snapshot["sessions"][0]["repos"]}
+    assert repos["ENG-12-change"]["error"]["kind"] == "network"
+    assert repos["main"]["error"] is None
 
 
 def test_rate_limit_keeps_completed_results_and_stops_remaining_requests(monkeypatch, tmp_path: Path) -> None:

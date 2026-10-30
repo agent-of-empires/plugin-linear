@@ -8,6 +8,8 @@ Links Linear issues to Agent of Empires sessions, showing workflow status, issue
 
 - Keeps previously loaded issue data visible and marks it stale when refresh fails.
 - Shows an unavailable state when a refresh fails before any issue data is cached.
+- Treats a checkout as not using Linear when its branch names no Linear issue, so a missing key or a failed request shows a neutral state instead of an error badge, column, or callout.
+- Coexists with the GitHub plugin: sessions without Linear work get a cleared Linear badge and status column, and the Linear sort option is only published while some session has a Linear issue.
 - Keeps session panes under the host's 64 KiB payload limit by dropping older comments, then truncating long descriptions when needed.
 
 ## Install from source
