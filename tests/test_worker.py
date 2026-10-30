@@ -52,7 +52,13 @@ def test_sort_key_is_removed_once_no_session_has_linear_issues() -> None:
         for message in (json.loads(line) for line in output.getvalue().splitlines())
     ]
     sort_key_calls = [call for call in calls if call[1] == "sort-key"]
-    assert sort_key_calls == [("ui.state.set", "sort-key"), ("ui.state.remove", "sort-key")]
+    assert sort_key_calls == [
+        # Startup clears any sort key an earlier worker left behind, then publishes only while
+        # some session has Linear issues.
+        ("ui.state.remove", "sort-key"),
+        ("ui.state.set", "sort-key"),
+        ("ui.state.remove", "sort-key"),
+    ]
 
 
 def test_community_plugin_open_uses_host_runtime_and_browser_action(monkeypatch) -> None:

@@ -71,7 +71,9 @@ class Runtime:
         self.show_priority = True
         self.next_refresh = 0.0
         self.refresh_due = False
-        self.sort_key_active = False
+        # Assume the host may still hold a sort key from an earlier worker, so the first push
+        # clears it when this snapshot has nothing Linear to sort by.
+        self.sort_key_active = True
 
     def send(self, message: dict[str, Any]) -> None:
         with self.lock:
