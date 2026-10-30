@@ -7,7 +7,66 @@ import pytest
 from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, ROW_COLUMN_SLOT, session_payloads
 
 
-def test_session_ui_shows_linear_status_and_selectable_linked_issues() -> None:
+def test_filter_facets_cover_linked_issue_workflow_and_priority() -> None:
+    snapshot = {
+        "sessions": [
+            {
+                "session_id": "s1",
+                "issues": [
+                    {"identifier": "ENG-1", "priority": 1, "state": {"type": "started"}},
+                    {"identifier": "ENG-2", "priority": 4, "state": {"type": "unstarted"}},
+                    {"identifier": "ENG-3", "priority": 0, "state": {"type": "future"}},
+                    {"identifier": "ENG-4", "state": {"type": "completed"}},
+                    {"identifier": "ENG-5", "priority": True, "state": {"type": "triage"}},
+                    {"identifier": "ENG-6", "priority": 5, "state": {"type": "backlog"}},
+                    {"identifier": "ENG-7", "priority": -1, "state": {"type": "canceled"}},
+                ],
+                "repos": [],
+            },
+            {"session_id": "s2", "issues": [], "repos": []},
+        ]
+    }
+    payloads = session_payloads(snapshot, {"s1": "ENG-1"}, show_priority=False)
+    facets = [item for item in payloads if item["slot"] == "filter-facet"]
+    assert [item["id"] for item in facets] == ["linear_workflow", "linear_priority"]
+    assert facets[0]["payload"]["column"] == ROW_COLUMN_SLOT[1]
+    assert facets[1]["payload"]["column"] == ROW_COLUMN_SLOT[1]
+    assert [option["value"] for option in facets[0]["payload"]["options"]] == [
+        "state:triage",
+        "state:backlog",
+        "state:unstarted",
+        "state:started",
+        "state:completed",
+        "state:canceled",
+    ]
+    assert [option["value"] for option in facets[1]["payload"]["options"]] == [
+        "priority:0",
+        "priority:1",
+        "priority:2",
+        "priority:3",
+        "priority:4",
+    ]
+    columns = {
+        item["session_id"]: item["payload"]["filter_values"]
+        for item in payloads
+        if item["slot"] == ROW_COLUMN_SLOT[0] and "filter_values" in item["payload"]
+    }
+    assert columns == {
+        "s1": [
+            "priority:0",
+            "priority:1",
+            "priority:4",
+            "state:backlog",
+            "state:canceled",
+            "state:completed",
+            "state:started",
+            "state:triage",
+            "state:unstarted",
+        ]
+    }
+
+
+def test_session_ui_shows_linear_status_and_selectable_linked_issues(recorded_linear_responses) -> None:
     issues = [
         {
             "id": "2",
@@ -26,16 +85,9 @@ def test_session_ui_shows_linear_status_and_selectable_linked_issues() -> None:
             "state": {"name": "In Progress", "type": "started", "color": "#5e6ad2"},
             "assignee": {"displayName": "A User"},
             "labels": {"nodes": [{"name": "Bug"}, {"name": "Backend"}]},
-            "attachments": {
-                "nodes": [
-                    {
-                        "id": "attachment-1",
-                        "title": "Pull request",
-                        "subtitle": "PR #1",
-                        "url": "https://github.com/acme/repo/pull/1",
-                    }
-                ]
-            },
+            "attachments": recorded_linear_responses["branch_match"]["body"]["data"]["issueVcsBranchSearch"][
+                "attachments"
+            ],
             "comments": {"nodes": [{"id": "comment-1", "body": "The fix is ready.", "user": {"name": "A User"}}]},
         },
     ]
@@ -67,7 +119,7 @@ def test_session_ui_shows_linear_status_and_selectable_linked_issues() -> None:
     details = next(block for block in pane["blocks"] if block.get("title") == "Details")
     assert {"kind": "row", "label": "Labels", "value": "Bug, Backend"} in details["children"]
     resources = next(block for block in pane["blocks"] if block.get("title") == "Linked resources")
-    assert resources["children"][0]["href"] == "https://github.com/acme/repo/pull/1"
+    assert resources["children"][0]["href"] == "https://example.invalid/recorded-resource"
     comments = next(block for block in pane["blocks"] if block.get("title") == "Comments")
     assert comments["children"] == [{"kind": "comment", "author": "A User", "body": "The fix is ready."}]
 
@@ -253,8 +305,9 @@ def test_session_without_linear_work_publishes_no_linear_state() -> None:
     }
     payloads = session_payloads(snapshot)
 
-    assert [item["slot"] for item in payloads] == [ROW_BADGE_SLOT[0], ROW_COLUMN_SLOT[0], PANE_SLOT[0]]
-    by_slot = {item["slot"]: item["payload"] for item in payloads}
+    session_payloads_by_slot = [item["slot"] for item in payloads if item.get("session_id") == "s1"]
+    assert session_payloads_by_slot == [ROW_BADGE_SLOT[0], ROW_COLUMN_SLOT[0], PANE_SLOT[0]]
+    by_slot = {item["slot"]: item["payload"] for item in payloads if item.get("session_id") == "s1"}
     assert by_slot[ROW_BADGE_SLOT[0]] == {"items": []}
     assert by_slot[ROW_COLUMN_SLOT[0]] == {}
     assert not any(block.get("tone") in {"warn", "danger"} for block in by_slot[PANE_SLOT[0]]["blocks"])

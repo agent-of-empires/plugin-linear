@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 
 from aoe_linear_plugin import refresh
+from aoe_linear_plugin.uistate import ROW_COLUMN_SLOT, session_payloads
 
 
 def _checkout(path: Path, branch: str) -> None:
@@ -31,18 +32,18 @@ def test_active_rate_limit_serves_last_good_snapshot_without_http(monkeypatch, t
     assert snapshot["rate_limited"] is True
 
 
-def test_shared_checkout_is_queried_once_for_multiple_sessions(monkeypatch, tmp_path: Path) -> None:
-    _checkout(tmp_path, "ENG-7-change")
+def test_shared_checkout_is_queried_once_for_multiple_sessions(
+    monkeypatch, tmp_path: Path, recorded_linear_responses
+) -> None:
+    _checkout(tmp_path, "recorded/live-1-branch")
     monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
     requests = []
 
     def respond(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         requests.append(payload["query"])
-        return httpx.Response(
-            200,
-            json={"data": {"issueVcsBranchSearch": {"id": "i7", "identifier": "ENG-7", "title": "Task"}}},
-        )
+        recorded = recorded_linear_responses["branch_match"]
+        return httpx.Response(recorded["http_status"], json=recorded["body"])
 
     shared_path = str(tmp_path)
     sessions = [
@@ -51,7 +52,7 @@ def test_shared_checkout_is_queried_once_for_multiple_sessions(monkeypatch, tmp_
     ]
     snapshot = refresh.build_snapshot(sessions, env={"LINEAR_API_KEY": "token"}, transport=httpx.MockTransport(respond))
     assert len(requests) == 1
-    assert [session["issues"][0]["identifier"] for session in snapshot["sessions"]] == ["ENG-7", "ENG-7"]
+    assert [session["issues"][0]["identifier"] for session in snapshot["sessions"]] == ["LIVE-1", "LIVE-1"]
 
 
 def test_workspace_repos_sharing_branch_are_queried_once(monkeypatch, tmp_path: Path) -> None:
@@ -127,12 +128,12 @@ def test_http_failure_marks_last_good_issue_data_stale(monkeypatch, tmp_path: Pa
         "sessions": [
             {
                 "session_id": "s1",
-                "issues": [{"id": "i1", "identifier": "ENG-1"}],
+                "issues": [{"id": "i1", "identifier": "ENG-1", "priority": 1, "state": {"type": "started"}}],
                 "repos": [
                     {
                         "path": str(tmp_path),
                         "branch": "ENG-1",
-                        "issues": [{"id": "i1", "identifier": "ENG-1"}],
+                        "issues": [{"id": "i1", "identifier": "ENG-1", "priority": 1, "state": {"type": "started"}}],
                     }
                 ],
             }
@@ -149,6 +150,8 @@ def test_http_failure_marks_last_good_issue_data_stale(monkeypatch, tmp_path: Pa
     assert [issue["identifier"] for issue in snapshot["sessions"][0]["issues"]] == ["ENG-1"]
     assert snapshot["sessions"][0]["stale"] is True
     assert snapshot["sessions"][0]["repos"][0]["error"]["kind"] == "network"
+    column = next(item["payload"] for item in session_payloads(snapshot) if item["slot"] == ROW_COLUMN_SLOT[0])
+    assert column["filter_values"] == ["priority:1", "state:started"]
 
 
 def test_http_rate_limit_sets_retry_backoff(monkeypatch, tmp_path: Path) -> None:

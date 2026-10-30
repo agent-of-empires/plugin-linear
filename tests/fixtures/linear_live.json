@@ -1,0 +1,75 @@
+{
+  "recorded_at": "2026-10-18T11:50:56.653278+00:00",
+  "endpoint": "https://api.linear.app/graphql",
+  "sanitization": "String content, identifiers, URLs, IDs and error extension values redacted; cycle numbers normalized to the synthetic value 1. Response structure, nulls, remaining numeric values and workflow types retained. No request headers recorded.",
+  "responses": {
+    "branch_match": {
+      "operation": "IssueVcsBranchSearch",
+      "http_status": 200,
+      "body": {
+        "data": {
+          "issueVcsBranchSearch": {
+            "id": "recorded-id-1",
+            "identifier": "LIVE-1",
+            "title": "redacted",
+            "url": "https://example.invalid/recorded-resource",
+            "description": "redacted",
+            "priority": 0,
+            "branchName": "recorded/live-1-branch",
+            "state": {"id": "recorded-id-2", "name": "redacted", "type": "started", "color": "redacted"},
+            "assignee": {"id": "recorded-id-3", "name": "redacted", "displayName": "redacted"},
+            "team": {"id": "recorded-id-4", "key": "redacted", "name": "redacted"},
+            "project": {"id": "recorded-id-5", "name": "redacted", "url": "https://example.invalid/recorded-resource"},
+            "cycle": {"id": "recorded-id-6", "name": null, "number": 1, "startsAt": "redacted", "endsAt": "redacted"},
+            "labels": {"nodes": []},
+            "attachments": {"nodes": [{"id": "recorded-id-7", "title": "redacted", "subtitle": null, "url": "https://example.invalid/recorded-resource"}]},
+            "comments": {"nodes": []}
+          }
+        }
+      }
+    },
+    "identifier_match": {
+      "operation": "IssueByIdentifier",
+      "http_status": 200,
+      "body": {
+        "data": {
+          "issue": {
+            "id": "recorded-id-1",
+            "identifier": "LIVE-1",
+            "title": "redacted",
+            "url": "https://example.invalid/recorded-resource",
+            "description": "redacted",
+            "priority": 0,
+            "branchName": "recorded/live-1-branch",
+            "state": {"id": "recorded-id-2", "name": "redacted", "type": "started", "color": "redacted"},
+            "assignee": {"id": "recorded-id-3", "name": "redacted", "displayName": "redacted"},
+            "team": {"id": "recorded-id-4", "key": "redacted", "name": "redacted"},
+            "project": {"id": "recorded-id-5", "name": "redacted", "url": "https://example.invalid/recorded-resource"},
+            "cycle": {"id": "recorded-id-6", "name": null, "number": 1, "startsAt": "redacted", "endsAt": "redacted"},
+            "labels": {"nodes": []},
+            "attachments": {"nodes": [{"id": "recorded-id-7", "title": "redacted", "subtitle": null, "url": "https://example.invalid/recorded-resource"}]},
+            "comments": {"nodes": []}
+          }
+        }
+      }
+    },
+    "branch_miss": {
+      "operation": "IssueVcsBranchSearch",
+      "http_status": 200,
+      "body": {"data": {"issueVcsBranchSearch": null}}
+    },
+    "identifier_not_found": {
+      "operation": "IssueByIdentifier",
+      "http_status": 200,
+      "body": {
+        "errors": [{
+          "message": "Entity not found: Issue",
+          "path": ["redacted"],
+          "locations": [{"line": 1, "column": 41}],
+          "extensions": {"type": "redacted", "code": "redacted", "statusCode": 400, "userError": true, "userPresentableMessage": "redacted"}
+        }],
+        "data": null
+      }
+    }
+  }
+}
