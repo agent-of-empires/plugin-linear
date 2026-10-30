@@ -9,42 +9,41 @@ from aoe_linear_plugin.client import API_URL, LinearClient
 from aoe_linear_plugin.errors import LinearAuthError, LinearGraphQLError, LinearRateLimitError
 
 
-def test_graphql_query_sends_token_and_variables() -> None:
+def test_graphql_query_sends_token_and_variables(recorded_linear_responses) -> None:
     seen = {}
 
     def respond(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
         seen["authorization"] = request.headers["Authorization"]
         seen["body"] = json.loads(request.content)
-        return httpx.Response(200, json={"data": {"issue": {"id": "issue-id"}}})
+        recorded = recorded_linear_responses["identifier_match"]
+        return httpx.Response(recorded["http_status"], json=recorded["body"])
 
     with LinearClient("secret-token", transport=httpx.MockTransport(respond)) as client:
-        issue = client.issue_by_identifier("ENG-12")
+        issue = client.issue_by_identifier("LIVE-1")
 
     assert seen["url"] == API_URL
     assert seen["authorization"] == "secret-token"
-    assert seen["body"]["variables"] == {"id": "ENG-12"}
-    assert "IssueByIdentifier" in seen["body"]["query"]
-    assert issue == {"id": "issue-id"}
+    assert seen["body"]["variables"] == {"id": "LIVE-1"}
+    assert issue["identifier"] == "LIVE-1"
+    assert issue["attachments"]["nodes"][0]["subtitle"] is None
 
 
-def test_branch_lookup_uses_linear_vcs_branch_search() -> None:
+def test_branch_lookup_uses_linear_vcs_branch_search(recorded_linear_responses) -> None:
     seen = {}
 
     def respond(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         seen.update(body)
-        return httpx.Response(
-            200,
-            json={"data": {"issueVcsBranchSearch": {"id": "1", "identifier": "ENG-12"}}},
-        )
+        recorded = recorded_linear_responses["branch_match"]
+        return httpx.Response(recorded["http_status"], json=recorded["body"])
 
     with LinearClient("token", transport=httpx.MockTransport(respond)) as client:
-        issue = client.issue_for_branch("feature/ENG-12-change")
+        issue = client.issue_for_branch("recorded/live-1-branch")
 
-    assert seen["variables"] == {"branchName": "feature/ENG-12-change"}
-    assert "issueVcsBranchSearch" in seen["query"]
-    assert issue == {"id": "1", "identifier": "ENG-12"}
+    assert seen["variables"] == {"branchName": "recorded/live-1-branch"}
+    assert issue["identifier"] == "LIVE-1"
+    assert issue["state"]["type"] == "started"
 
 
 def test_http_auth_rate_limit_and_graphql_errors_are_typed() -> None:
