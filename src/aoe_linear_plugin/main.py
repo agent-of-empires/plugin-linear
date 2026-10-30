@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from aoe_linear_plugin import refresh as refresh_data
+from aoe_linear_plugin import suggestions as suggestion_data
 from aoe_linear_plugin.errors import LinearError
 from aoe_linear_plugin.handlers import linear_open, linear_status
 from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, ROW_COLUMN_SLOT, SELECT_METHOD, session_payloads
@@ -62,6 +63,7 @@ class Runtime:
         self.interval = DEFAULT_REFRESH_SECS
         self.ignore_submodules = True
         self.show_priority = True
+        self.suggestion_settings: dict[str, Any] = {}
         self.next_refresh = 0.0
         self.refresh_due = False
 
@@ -119,6 +121,29 @@ class Runtime:
         self._remove_vanished(active)
         self.pushed = {sid for sid in active if isinstance(sid, str)}
 
+    def refresh_suggestions(self) -> None:
+        """Publish a complete successful snapshot, or report failure without clearing it."""
+        try:
+            items = suggestion_data.build_suggestions(self.suggestion_settings)
+        except (LinearError, ValueError, TypeError) as exc:
+            self.send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": next(_ids),
+                    "method": "suggestions.error",
+                    "params": {"message": str(exc)},
+                }
+            )
+            return
+        self.send(
+            {
+                "jsonrpc": "2.0",
+                "id": next(_ids),
+                "method": "suggestions.set",
+                "params": {"items": items},
+            }
+        )
+
     def _remove_vanished(self, active: set[Any]) -> None:
         for sid in self.pushed - active:
             for slot, slot_id in (ROW_BADGE_SLOT, ROW_COLUMN_SLOT, PANE_SLOT):
@@ -168,6 +193,9 @@ class Runtime:
         params = message.get("params") or {}
         msg_id = message.get("id")
         try:
+            if method == "suggestions.refresh":
+                self.refresh_due = True
+                return
             result = self._command_result(method, params)
             self._after_command(method, params)
         except UnknownMethodError:
@@ -199,6 +227,16 @@ class Runtime:
                     self.interval = DEFAULT_REFRESH_SECS
         self._configure_boolean("ignore_submodules")
         self._configure_boolean("show_priority")
+        for key in (
+            "suggestion_up_next_states",
+            "suggestion_team_scope",
+            "suggestion_project_scope",
+            "suggestion_project_mappings",
+        ):
+            result = self.call_host("config.get", {"key": key})
+            value = result.get("value") if isinstance(result, dict) else None
+            if isinstance(value, str):
+                self.suggestion_settings[key] = value
 
     def _configure_boolean(self, key: str) -> None:
         result = self.call_host("config.get", {"key": key})
@@ -209,6 +247,18 @@ class Runtime:
     def _scheduled_refresh(self) -> None:
         self.refresh_due = False
         try:
+            try:
+                self.refresh_suggestions()
+            except Exception:  # noqa: BLE001 — suggestion failures must not block session refresh.
+                sys.stderr.write("Linear suggestion refresh failed unexpectedly.\n")
+                self.send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": next(_ids),
+                        "method": "suggestions.error",
+                        "params": {"message": "Linear suggestion refresh failed unexpectedly."},
+                    }
+                )
             self.refresh()
         except Exception as exc:  # noqa: BLE001  one failed poll must not terminate the worker.
             sys.stderr.write(f"Linear refresh failed unexpectedly ({type(exc).__name__}).\n")
