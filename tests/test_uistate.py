@@ -7,6 +7,65 @@ import pytest
 from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, ROW_COLUMN_SLOT, session_payloads
 
 
+def test_filter_facets_cover_linked_issue_workflow_and_priority() -> None:
+    snapshot = {
+        "sessions": [
+            {
+                "session_id": "s1",
+                "issues": [
+                    {"identifier": "ENG-1", "priority": 1, "state": {"type": "started"}},
+                    {"identifier": "ENG-2", "priority": 4, "state": {"type": "unstarted"}},
+                    {"identifier": "ENG-3", "priority": 0, "state": {"type": "future"}},
+                    {"identifier": "ENG-4", "state": {"type": "completed"}},
+                    {"identifier": "ENG-5", "priority": True, "state": {"type": "triage"}},
+                    {"identifier": "ENG-6", "priority": 5, "state": {"type": "backlog"}},
+                    {"identifier": "ENG-7", "priority": -1, "state": {"type": "canceled"}},
+                ],
+                "repos": [],
+            },
+            {"session_id": "s2", "issues": [], "repos": []},
+        ]
+    }
+    payloads = session_payloads(snapshot, {"s1": "ENG-1"}, show_priority=False)
+    facets = [item for item in payloads if item["slot"] == "filter-facet"]
+    assert [item["id"] for item in facets] == ["linear_workflow", "linear_priority"]
+    assert facets[0]["payload"]["column"] == ROW_COLUMN_SLOT[1]
+    assert facets[1]["payload"]["column"] == ROW_COLUMN_SLOT[1]
+    assert [option["value"] for option in facets[0]["payload"]["options"]] == [
+        "state:triage",
+        "state:backlog",
+        "state:unstarted",
+        "state:started",
+        "state:completed",
+        "state:canceled",
+    ]
+    assert [option["value"] for option in facets[1]["payload"]["options"]] == [
+        "priority:0",
+        "priority:1",
+        "priority:2",
+        "priority:3",
+        "priority:4",
+    ]
+    columns = {
+        item["session_id"]: item["payload"]["filter_values"]
+        for item in payloads
+        if item["slot"] == ROW_COLUMN_SLOT[0] and "filter_values" in item["payload"]
+    }
+    assert columns == {
+        "s1": [
+            "priority:0",
+            "priority:1",
+            "priority:4",
+            "state:backlog",
+            "state:canceled",
+            "state:completed",
+            "state:started",
+            "state:triage",
+            "state:unstarted",
+        ]
+    }
+
+
 def test_session_ui_shows_linear_status_and_selectable_linked_issues(recorded_linear_responses) -> None:
     issues = [
         {
