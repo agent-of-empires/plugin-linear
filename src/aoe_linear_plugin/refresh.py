@@ -17,6 +17,7 @@ from aoe_linear_plugin.errors import LinearError
 from aoe_linear_plugin.resolver import branch_is_linear, resolve_branch
 
 AUTH_HINT = "Set LINEAR_API_KEY to load Linear issue data."
+RATE_HINT = "Linear rate limit active; refresh will retry later."
 
 _lock = threading.Lock()
 _state: dict[str, Any] = {
@@ -70,7 +71,7 @@ def build_snapshot(
     token = resolve_token(os.environ if env is None else env)
     with _lock:
         if time.monotonic() < _state["backoff_until"]:
-            return _stale_snapshot(_state["snapshot"], sessions)
+            return _stale_snapshot(_state["snapshot"], sessions, ignore_submodules=ignore_submodules)
         checkout_map = {
             session.get("id"): discover_checkouts(session, ignore_submodules=ignore_submodules) for session in sessions
         }
@@ -123,6 +124,26 @@ def _session_entry(session: dict[str, Any], repos: list[dict[str, Any]]) -> dict
     }
 
 
+def _unavailable_repos(
+    checkouts: list[dict[str, str]],
+    error: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Checkouts whose branches were never fetched, flagged only where Linear is likely."""
+    repos: list[dict[str, Any]] = []
+    for checkout in checkouts:
+        linked = branch_is_linear(checkout["branch"])
+        repos.append(
+            {
+                **checkout,
+                "name": Path(checkout["path"]).name,
+                "issues": [],
+                "linked": linked,
+                "error": dict(error) if linked else None,
+            }
+        )
+    return repos
+
+
 def _auth_snapshot(
     sessions: list[dict[str, Any]],
     checkout_map: dict[Any, list[dict[str, str]]],
@@ -130,19 +151,8 @@ def _auth_snapshot(
     """Report missing credentials only where a branch actually names a Linear issue."""
     output = []
     for session in sessions:
-        repos: list[dict[str, Any]] = []
-        for checkout in checkout_map.get(session.get("id"), []):
-            linked = branch_is_linear(checkout["branch"])
-            repos.append(
-                {
-                    **checkout,
-                    "name": Path(checkout["path"]).name,
-                    "issues": [],
-                    "linked": linked,
-                    "error": {"kind": "auth", "hint": AUTH_HINT} if linked else None,
-                }
-            )
-        output.append(_session_entry(session, repos))
+        checkouts = checkout_map.get(session.get("id"), [])
+        output.append(_session_entry(session, _unavailable_repos(checkouts, {"kind": "auth", "hint": AUTH_HINT})))
     return {"sessions": output, "auth": {"present": False}}
 
 
@@ -190,7 +200,12 @@ def _previous_repo(snapshot: dict[str, Any], path: str, branch: str) -> dict[str
     return None
 
 
-def _stale_snapshot(cached: dict[str, Any], sessions: list[dict[str, Any]]) -> dict[str, Any]:
+def _stale_snapshot(
+    cached: dict[str, Any],
+    sessions: list[dict[str, Any]],
+    *,
+    ignore_submodules: bool = True,
+) -> dict[str, Any]:
     old = {item.get("session_id"): item for item in cached.get("sessions", [])}
     results = []
     for session in sessions:
@@ -206,7 +221,7 @@ def _stale_snapshot(cached: dict[str, Any], sessions: list[dict[str, Any]]) -> d
                         {
                             **repo,
                             "error": (
-                                {"kind": "rate_limited", "hint": "Linear rate limit active; refresh will retry later."}
+                                {"kind": "rate_limited", "hint": RATE_HINT}
                                 if repo.get("linked") or repo.get("issues")
                                 else None
                             ),
@@ -214,6 +229,9 @@ def _stale_snapshot(cached: dict[str, Any], sessions: list[dict[str, Any]]) -> d
                         for repo in stale["repos"]
                     ]
         else:
-            stale = _session_entry(session, [])
+            # A session that appeared during backoff still gets its branch inspected, so a Linear
+            # branch keeps an actionable rate-limit state instead of looking unlinked.
+            checkouts = discover_checkouts(session, ignore_submodules=ignore_submodules)
+            stale = _session_entry(session, _unavailable_repos(checkouts, {"kind": "rate_limited", "hint": RATE_HINT}))
         results.append(stale)
     return {"sessions": results, "auth": cached.get("auth", {"present": True}), "rate_limited": True}

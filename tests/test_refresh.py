@@ -261,6 +261,26 @@ def test_missing_credentials_are_reported_only_for_linear_branches(monkeypatch, 
     assert sessions["s2"]["repos"][0]["error"] is None
 
 
+def test_rate_limit_backoff_reports_linked_new_sessions(monkeypatch, tmp_path: Path) -> None:
+    linked = tmp_path / "linked"
+    other = tmp_path / "other"
+    _checkout(linked, "ENG-12-change")
+    _checkout(other, "main")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 9999999999.0})
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(linked)}, {"id": "s2", "project_path": str(other)}],
+        env={},
+    )
+
+    sessions = {session["session_id"]: session for session in snapshot["sessions"]}
+    assert sessions["s1"]["linked"] is True
+    assert sessions["s1"]["repos"][0]["error"]["kind"] == "rate_limited"
+    assert sessions["s2"]["linked"] is False
+    assert sessions["s2"]["repos"][0]["error"] is None
+    assert snapshot["rate_limited"] is True
+
+
 def test_unlinked_branch_that_fails_to_look_up_stays_quiet(monkeypatch, tmp_path: Path) -> None:
     _checkout(tmp_path, "main")
     monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})

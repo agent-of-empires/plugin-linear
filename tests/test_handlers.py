@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 import httpx
+import pytest
 
 from aoe_linear_plugin.auth import resolve_token
 from aoe_linear_plugin.handlers import linear_open, linear_status
@@ -48,6 +49,13 @@ def test_unlinked_checkout_ignores_api_failures(tmp_path: Path) -> None:
 def test_open_without_a_linked_issue_is_not_an_error(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-b", "main", str(tmp_path)], check=True, capture_output=True)
     assert linear_open(str(tmp_path), env={}) == {"url": "", "kind": "none", "identifier": ""}
+
+
+def test_open_reports_a_linked_branch_whose_issue_is_missing(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-b", "ENG-404-missing", str(tmp_path)], check=True, capture_output=True)
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}}))
+    with pytest.raises(ValueError, match="No Linear issue is linked"):
+        linear_open(str(tmp_path), env={"LINEAR_API_KEY": "token"}, transport=transport)
 
 
 def test_status_uses_branch_issue_identifier_and_summarizes_state(tmp_path: Path) -> None:

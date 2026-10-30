@@ -9,15 +9,19 @@ from typing import Any
 from aoe_linear_plugin.client import LinearClient
 from aoe_linear_plugin.errors import LinearGraphQLError
 
-_IDENTIFIER = re.compile(r"(?<![A-Z0-9])([A-Z][A-Z0-9]{0,19}-[1-9][0-9]*)(?![A-Z0-9.])", re.IGNORECASE)
+_IDENTIFIER = re.compile(r"(?<![A-Z0-9])([A-Z][A-Z0-9]{0,19}-[1-9][0-9]*)(?![A-Z0-9]|\.\d)", re.IGNORECASE)
+_DEPENDENCY_BRANCH = re.compile(r"^(?:dependabot|renovate|snyk|pre-commit-ci|greenkeeper)/", re.IGNORECASE)
 
 
 def branch_is_linear(branch: str) -> bool:
     """Whether a branch names a Linear issue, the only local signal that a checkout uses Linear.
 
-    The trailing lookahead rejects dotted version suffixes, so dependency branches like
-    ``dependabot/pip/httpx-0.27.0`` are not mistaken for Linear work.
+    A dotted version suffix is not an issue number, so ``dependabot/pip/httpx-0.27.0`` does not
+    count, and known dependency-update branches are excluded even when the package name ends in
+    a bare integer (``dependabot/npm_and_yarn/react-18``).
     """
+    if _DEPENDENCY_BRANCH.match(branch):
+        return False
     return bool(identifiers_in_branch(branch))
 
 

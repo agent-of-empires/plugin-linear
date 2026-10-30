@@ -100,6 +100,8 @@ def linear_open(
         error = status["error"]
         if error:
             raise ValueError(error["hint"])
+        if status["linked"]:
+            raise ValueError("No Linear issue is linked to this branch.")
         # Fail soft for a checkout Linear is not part of, like the GitHub plugin's compare fallback.
         return {"url": "", "kind": "none", "identifier": ""}
     url = issue_url(issue)

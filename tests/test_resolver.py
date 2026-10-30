@@ -20,8 +20,15 @@ def test_dependency_branches_are_not_treated_as_linear_work() -> None:
     assert branch_is_linear("feature/ENG-12-add-work") is True
     assert branch_is_linear("eng-12-fix") is True
     assert branch_is_linear("dependabot/pip/httpx-0.27.0") is False
+    assert branch_is_linear("dependabot/npm_and_yarn/react-18") is False
+    assert branch_is_linear("renovate/react-18.x") is False
     assert branch_is_linear("renovate/major-react-monorepo") is False
     assert branch_is_linear("main") is False
+
+
+def test_dotted_issue_branches_still_name_their_issue() -> None:
+    assert identifiers_in_branch("feature/ENG-12.fix") == ["ENG-12"]
+    assert identifiers_in_branch("dependabot/pip/httpx-0.27.0") == []
 
 
 def test_resolve_branch_combines_branch_metadata_and_identifiers() -> None:
