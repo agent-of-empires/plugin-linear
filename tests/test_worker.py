@@ -30,7 +30,35 @@ def test_community_plugin_status_uses_host_runtime(tmp_path: Path, monkeypatch) 
     response = json.loads(output.getvalue())
     assert response["id"] == 7
     assert response["result"]["branch"] == "linear-worker-test"
-    assert response["result"]["error"]["kind"] == "auth"
+    assert response["result"]["linked"] is False
+    assert response["result"]["error"] is None
+
+
+def test_sort_key_is_removed_once_no_session_has_linear_issues() -> None:
+    output = io.StringIO()
+    runtime = Runtime(stdin=io.StringIO(""), stdout=output)
+    unlinked = {"sessions": [{"session_id": "s1", "issues": [], "linked": False, "repos": []}]}
+    linked = {"sessions": [{"session_id": "s1", "issues": [{"identifier": "ENG-1", "title": "Task"}], "repos": []}]}
+
+    runtime.snapshot = unlinked
+    runtime._push()
+    runtime.snapshot = linked
+    runtime._push()
+    runtime.snapshot = unlinked
+    runtime._push()
+
+    calls = [
+        (message["method"], message["params"]["slot"])
+        for message in (json.loads(line) for line in output.getvalue().splitlines())
+    ]
+    sort_key_calls = [call for call in calls if call[1] == "sort-key"]
+    assert sort_key_calls == [
+        # Startup clears any sort key an earlier worker left behind, then publishes only while
+        # some session has Linear issues.
+        ("ui.state.remove", "sort-key"),
+        ("ui.state.set", "sort-key"),
+        ("ui.state.remove", "sort-key"),
+    ]
 
 
 def test_community_plugin_open_uses_host_runtime_and_browser_action(monkeypatch) -> None:

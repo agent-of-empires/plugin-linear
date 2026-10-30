@@ -26,6 +26,8 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn
 - Pane details include issue status, priority, team, assignee, project, cycle, description, up to 10 recent comments, and attached resources. The selected issue appears in the pane header; the selector lists only alternate issues. Attachments may include linked pull requests when Linear has attached them.
 - Keeps previously loaded issue data visible and marks it stale when refresh fails.
 - Shows an unavailable state when a refresh fails before any issue data is cached.
+- Treats a checkout as not using Linear when its branch names no Linear issue, so a missing key or a failed request shows a neutral state instead of an error badge, column, or callout.
+- Coexists with the GitHub plugin: sessions without Linear work get a cleared Linear badge and status column, and the Linear sort option is only published while some session has a Linear issue.
 - Session panes stay under the host's 64 KiB payload limit by dropping older comments, then truncating long descriptions when needed.
 
 The session row exposes Linear workflow and priority as filter facets for the dashboard and Kanban Board. Facet values include every linked issue in that session, not only the selected issue; refreshes with cached issue data keep those values. The filter contract:

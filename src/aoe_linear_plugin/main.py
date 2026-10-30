@@ -14,7 +14,14 @@ from typing import Any
 from aoe_linear_plugin import refresh as refresh_data
 from aoe_linear_plugin.errors import LinearError
 from aoe_linear_plugin.handlers import linear_open, linear_status
-from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, ROW_COLUMN_SLOT, SELECT_METHOD, session_payloads
+from aoe_linear_plugin.uistate import (
+    PANE_SLOT,
+    ROW_BADGE_SLOT,
+    ROW_COLUMN_SLOT,
+    SELECT_METHOD,
+    SORT_KEY_SLOT,
+    session_payloads,
+)
 
 DEFAULT_REFRESH_SECS = 120
 RPC_TIMEOUT = 10.0
@@ -64,6 +71,9 @@ class Runtime:
         self.show_priority = True
         self.next_refresh = 0.0
         self.refresh_due = False
+        # Assume the host may still hold a sort key from an earlier worker, so the first push
+        # clears it when this snapshot has nothing Linear to sort by.
+        self.sort_key_active = True
 
     def send(self, message: dict[str, Any]) -> None:
         with self.lock:
@@ -126,7 +136,19 @@ class Runtime:
                 self.send({"jsonrpc": "2.0", "id": next(_ids), "method": "ui.state.remove", "params": params})
 
     def _push(self) -> None:
-        for params in session_payloads(self.snapshot, self.selected, show_priority=self.show_priority):
+        payloads = session_payloads(self.snapshot, self.selected, show_priority=self.show_priority)
+        sort_key = any(params.get("slot") == SORT_KEY_SLOT[0] for params in payloads)
+        if self.sort_key_active and not sort_key:
+            self.send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": next(_ids),
+                    "method": "ui.state.remove",
+                    "params": {"slot": SORT_KEY_SLOT[0], "id": SORT_KEY_SLOT[1]},
+                }
+            )
+        self.sort_key_active = sort_key
+        for params in payloads:
             method = "ui.state.set"
             if params.get("slot") == ROW_COLUMN_SLOT[0] and not params.get("payload", {}).get("text"):
                 method = "ui.state.remove"

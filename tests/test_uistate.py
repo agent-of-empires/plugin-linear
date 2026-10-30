@@ -150,7 +150,11 @@ def test_issue_state_icons_follow_linear_workflow_types() -> None:
 
 
 def test_no_issue_shows_api_error_without_fabricating_issue_state() -> None:
-    snapshot = {"sessions": [{"session_id": "s1", "issues": [], "repos": [{"error": {"hint": "API unavailable"}}]}]}
+    snapshot = {
+        "sessions": [
+            {"session_id": "s1", "issues": [], "linked": True, "repos": [{"error": {"hint": "API unavailable"}}]}
+        ]
+    }
     payloads = session_payloads(snapshot)
     by_slot = {item["slot"]: item["payload"] for item in payloads if item.get("session_id") == "s1"}
     assert by_slot[ROW_BADGE_SLOT[0]]["items"][0]["text"] == "Linear error"
@@ -202,6 +206,7 @@ def test_empty_stale_error_does_not_claim_cached_data() -> None:
             {
                 "session_id": "s1",
                 "issues": [],
+                "linked": True,
                 "repos": [{"error": {"hint": "Linear GraphQL error"}}],
                 "stale": True,
             }
@@ -281,6 +286,43 @@ def test_partial_repo_failure_is_visible_without_claiming_cached_data() -> None:
     assert any(block.get("detail") == "Authentication failed" for block in pane["blocks"])
     assert any(block.get("title", "").startswith("ENG-1") for block in pane["blocks"])
     assert not any("cached" in block.get("text", "") for block in pane["blocks"])
+
+
+def test_session_without_linear_work_publishes_no_linear_state() -> None:
+    snapshot = {
+        "sessions": [
+            {
+                "session_id": "s1",
+                "issues": [],
+                "linked": False,
+                "repos": [
+                    {"path": "/repo", "branch": "main", "issues": [], "linked": False, "error": None},
+                    # Defensive: a leftover error on an unlinked checkout must still stay quiet.
+                    {"path": "/repo2", "branch": "develop", "issues": [], "linked": False, "error": {"hint": "x"}},
+                ],
+            }
+        ]
+    }
+    payloads = session_payloads(snapshot)
+
+    session_payloads_by_slot = [item["slot"] for item in payloads if item.get("session_id") == "s1"]
+    assert session_payloads_by_slot == [ROW_BADGE_SLOT[0], ROW_COLUMN_SLOT[0], PANE_SLOT[0]]
+    by_slot = {item["slot"]: item["payload"] for item in payloads if item.get("session_id") == "s1"}
+    assert by_slot[ROW_BADGE_SLOT[0]] == {"items": []}
+    assert by_slot[ROW_COLUMN_SLOT[0]] == {}
+    assert not any(block.get("tone") in {"warn", "danger"} for block in by_slot[PANE_SLOT[0]]["blocks"])
+
+
+def test_sort_key_is_published_only_while_some_session_has_linear_issues() -> None:
+    unlinked = {"sessions": [{"session_id": "s1", "issues": [], "linked": False, "repos": []}]}
+    linked = {"sessions": [{"session_id": "s1", "issues": [{"identifier": "ENG-1"}], "repos": []}]}
+
+    assert all(item["slot"] != "sort-key" for item in session_payloads(unlinked))
+    assert session_payloads(linked)[0]["payload"] == {
+        "label": "Linear issue attention",
+        "column": ROW_COLUMN_SLOT[1],
+        "direction": "asc",
+    }
 
 
 def test_attachment_with_null_subtitle_renders_without_a_null_label() -> None:

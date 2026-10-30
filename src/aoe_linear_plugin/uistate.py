@@ -154,7 +154,14 @@ def _issue_rows(
     return rows
 
 
+def _linked(session: dict[str, Any]) -> bool:
+    """Whether Linear is part of this session's work, so nothing is claimed otherwise."""
+    return bool(session.get("linked")) or bool(session.get("issues"))
+
+
 def _error_for(session: dict[str, Any]) -> dict[str, Any] | None:
+    if not _linked(session):
+        return None
     return next((repo.get("error") for repo in session.get("repos", []) if repo.get("error")), None)
 
 
@@ -452,12 +459,21 @@ def session_payloads(
     *,
     show_priority: bool = True,
 ) -> list[dict[str, Any]]:
-    """Build per-session UI state plus global sort and filter definitions."""
+    """Build per-session UI state plus global sort and filter definitions.
+
+    The sort key is only published while some session has Linear issues, so an enabled GitHub
+    plugin's rows are not joined by a Linear sort option that can never order anything.
+    """
     selected = selected or {}
-    result = [{"slot": SORT_KEY_SLOT[0], "id": SORT_KEY_SLOT[1], "payload": dict(SORT_KEY_PAYLOAD)}]
+    sessions = snapshot.get("sessions", [])
+    result = (
+        [{"slot": SORT_KEY_SLOT[0], "id": SORT_KEY_SLOT[1], "payload": dict(SORT_KEY_PAYLOAD)}]
+        if any(session.get("issues") for session in sessions)
+        else []
+    )
     result.extend(
         {"slot": FILTER_FACET_SLOT, "id": facet_id, "payload": payload} for facet_id, payload in FILTER_FACETS
     )
-    for session in snapshot.get("sessions", []):
+    for session in sessions:
         result.extend(_session_ui(session, selected, show_priority=show_priority))
     return result
