@@ -1,13 +1,13 @@
 # Linear plugin for Agent of Empires
 
-Refresh failures keep previously loaded issue data visible and mark it stale.
-A failure before any issue data is cached is shown as unavailable, not stale.
+A refresh failure for a checkout with cached issues keeps that data visible and marks the affected session stale.
+A failure for a checkout with no cached issues is shown as unavailable, not stale; cached issues from other checkouts alone do not mark the session stale.
 
 The Linear plugin resolves issue state for session branches and displays it in the session list and a Linear pane. It uses Linear's GraphQL API directly; it does not shell out to `linear` or `gh`.
 
 ## Install and authenticate
 
-AoE 1.20.0 or newer and Python 3.10+ are required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/`; `pip` access to package dependencies is required. Local source trees must not contain symlinks such as `.venv`.
+AoE 1.20.0 or newer, below 2.0.0 (the manifest declares `>=1.20.0, <2.0.0`), and Python 3.10+ are required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/`; `pip` access to package dependencies is required. Local source trees must not contain symlinks such as `.venv`.
 
 Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache.
 
@@ -24,8 +24,8 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn
 - Session refresh considers the session checkout and host-provided `workspace_repos`, deduplicates repeated issue records, and keeps prior UI state while sessions are unavailable.
 - The row badge links to the selected issue and shows its Linear workflow-state glyph; the status column shows only its workflow state; sorting ranks urgent/high/started issues ahead of completed issues.
 - Pane details include issue status, priority, team, assignee, project, cycle, description, up to 10 recent comments, and attached resources. The selected issue appears in the pane header; the selector lists only alternate issues. Attachments may include linked pull requests when Linear has attached them.
-- Keeps previously loaded issue data visible and marks it stale when refresh fails.
-- Shows an unavailable state when a refresh fails before any issue data is cached.
+- Keeps cached issue data visible and marks the session stale when the refresh of a checkout with cached issues fails.
+- Shows an unavailable state for a checkout whose refresh fails before any issue data is cached.
 - Session panes stay under the host's 64 KiB payload limit by dropping older comments, then truncating long descriptions when needed.
 
 The session row exposes Linear workflow and priority as filter facets for the dashboard and Kanban Board. Facet values include every linked issue in that session, not only the selected issue; refreshes with cached issue data keep those values. The filter contract:
@@ -37,7 +37,7 @@ The session row exposes Linear workflow and priority as filter facets for the da
 
 ## Install from source
 
-AoE 1.20.0 or newer is required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/` during installation. Python 3.10+ and `pip` access to the package dependencies are required. For a local install, use a clean source tree (no `.venv` or other symlinks); the AoE installer rejects symlinks in local plugin sources.
+AoE 1.20.0 or newer, below 2.0.0 (the manifest declares `>=1.20.0, <2.0.0`), is required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/` during installation. Python 3.10+ and `pip` access to the package dependencies are required. For a local install, use a clean source tree (no `.venv` or other symlinks); the AoE installer rejects symlinks in local plugin sources.
 
 The manifest uses the unverified community ID `community.linear`. There is no published GitHub release or tag yet. `gh:agent-of-empires/plugin-linear` therefore cannot resolve to a release; AoE can fall back to the unverified default branch only with explicit consent (`--yes` or an interactive confirmation). That branch must contain this manifest before it can install this plugin. Linear is not in AoE's featured index; a featured-index entry is only needed to claim a reserved verified namespace or featured listing.
 
