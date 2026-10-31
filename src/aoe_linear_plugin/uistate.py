@@ -93,6 +93,28 @@ def _state_visual(issue: dict[str, Any]) -> tuple[str, str, str | None]:
     return icon, tone, None
 
 
+def _workflow_label(state: dict[str, Any]) -> str:
+    """Linear's workflow category, short enough for a row shared with another plugin.
+
+    Two plugins can publish a row column, and the host caps each at 128px and never
+    shrinks one, so the exact state name ("In Progress") is what pushes the badges
+    out of the row. The tooltip keeps the full name.
+    """
+    state_type = state.get("type")
+    label = _WORKFLOW_LABELS.get(state_type) if isinstance(state_type, str) else None
+    if label:
+        return label
+    name = state.get("name")
+    return name if isinstance(name, str) and name else "Open"
+
+
+def _status_tooltip(state: dict[str, Any], issue: dict[str, Any]) -> str:
+    name = state.get("name")
+    status = name if isinstance(name, str) and name else _workflow_label(state)
+    title = issue.get("title")
+    return f"{status} · {title}" if isinstance(title, str) and title else status
+
+
 def _rank(issue: dict[str, Any]) -> int:
     state = _state(issue).get("type", "")
     priority = issue.get("priority", 0)
@@ -400,8 +422,9 @@ def _session_ui(
     column: dict[str, Any] = {}
     if current:
         state = _state(current)
-        icon, state_tone, _ = _state_visual(current)
-        tone = "success" if state.get("type") == "completed" else "warn" if current.get("priority") == 1 else state_tone
+        # The row prints a workflow status, so its tone describes that status only: tinting it
+        # by priority or by cache staleness made the text read as a different state than it says.
+        icon, tone, _ = _state_visual(current)
         badge_items.append(
             {
                 "text": current.get("identifier", "Linear"),
@@ -412,9 +435,9 @@ def _session_ui(
             }
         )
         column = {
-            "text": state.get("name", "Open"),
+            "text": _workflow_label(state),
             "tone": tone,
-            "tooltip": current.get("title", ""),
+            "tooltip": _status_tooltip(state, current),
             "sort_value": _rank(current),
         }
         column["filter_values"] = _filter_values(issues)
@@ -425,9 +448,8 @@ def _session_ui(
             badge_items.append({"text": "Linear error", "tone": "danger", "tooltip": hint})
             column = {"text": "Linear unavailable", "tone": "danger", "tooltip": hint, "sort_value": 98}
     if session.get("stale") and issues:
+        # The labelled chip carries the staleness; the status text keeps its workflow color.
         badge_items.append({"text": "stale", "tone": "warn", "tooltip": "Showing cached Linear issue data"})
-        if column:
-            column["tone"] = "warn"
     badge_payload: dict[str, Any] = {"items": badge_items}
     if current and isinstance(current.get("url"), str):
         badge_payload["href"] = current["url"]
