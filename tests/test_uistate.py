@@ -97,7 +97,9 @@ def test_session_ui_shows_linear_status_and_selectable_linked_issues(recorded_li
 
     assert by_slot[ROW_BADGE_SLOT[0]]["items"][0]["text"] == "ENG-1"
     assert by_slot[ROW_BADGE_SLOT[0]]["items"][0]["icon"] == "circle-dot"
-    assert by_slot[ROW_COLUMN_SLOT[0]]["text"] == "In Progress"
+    assert by_slot[ROW_COLUMN_SLOT[0]]["text"] == "Started"
+    assert by_slot[ROW_COLUMN_SLOT[0]]["tooltip"] == "In Progress · Urgent"
+    assert by_slot[ROW_BADGE_SLOT[0]]["items"][0]["tone"] == "info"
     assert by_slot[ROW_BADGE_SLOT[0]]["href"] == "https://linear.app/acme/issue/ENG-1"
     assert payloads[0]["payload"] == {
         "label": "Linear issue attention",
@@ -196,8 +198,38 @@ def test_stale_cache_is_visible_in_row_and_pane() -> None:
     payloads = session_payloads(snapshot)
     by_slot = {item["slot"]: item["payload"] for item in payloads if item.get("session_id") == "s1"}
     assert by_slot[ROW_BADGE_SLOT[0]]["items"][-1]["text"] == "stale"
-    assert by_slot[ROW_COLUMN_SLOT[0]]["tone"] == "warn"
+    # The labelled chip carries staleness; the status text keeps its workflow tone.
+    assert by_slot[ROW_COLUMN_SLOT[0]]["tone"] == "neutral"
     assert by_slot[PANE_SLOT[0]]["blocks"][0]["tone"] == "warn"
+
+
+def test_row_status_color_follows_the_workflow_state_not_priority() -> None:
+    states = [
+        ("In Progress", "started", "info"),
+        ("Done", "completed", "success"),
+        ("Canceled", "canceled", "neutral"),
+        ("Todo", "unstarted", "neutral"),
+    ]
+    snapshot = {
+        "sessions": [
+            {
+                "session_id": f"s{index}",
+                "issues": [{"identifier": "ENG-1", "priority": 1, "state": {"name": name, "type": state_type}}],
+                "repos": [],
+            }
+            for index, (name, state_type, _) in enumerate(states)
+        ]
+    }
+    payloads = session_payloads(snapshot)
+
+    columns = {item["session_id"]: item["payload"] for item in payloads if item["slot"] == ROW_COLUMN_SLOT[0]}
+    badges = {item["session_id"]: item["payload"]["items"][0] for item in payloads if item["slot"] == ROW_BADGE_SLOT[0]}
+    assert {sid: column["tone"] for sid, column in columns.items()} == {
+        f"s{index}": tone for index, (_, _, tone) in enumerate(states)
+    }
+    assert {sid: badge["tone"] for sid, badge in badges.items()} == {
+        f"s{index}": tone for index, (_, _, tone) in enumerate(states)
+    }
 
 
 def test_empty_stale_error_does_not_claim_cached_data() -> None:
