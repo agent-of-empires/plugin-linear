@@ -58,6 +58,8 @@ Linear is an issue tracker, not a source-control or CI provider. This plugin rep
 - **Show Linear status for snoozed sessions** (`include_snoozed`, off by default): the session list keeps a snoozed session as a sunk row, and turning this on keeps its Linear row badge and status column live. It costs Linear requests for parked work, since every poll re-queries those branches.
 - **Ignore Git submodules**: excludes initialized nested child submodules during checkout discovery; the session's primary checkout is retained.
 
+Settings writes reach the running worker as the host's `plugin.settings.changed` notification, so a change applies on the next poll without restarting the worker.
+
 ## Development
 
 Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).

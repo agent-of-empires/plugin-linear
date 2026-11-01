@@ -25,6 +25,7 @@ from aoe_linear_plugin.uistate import (
 
 DEFAULT_REFRESH_SECS = 120
 RPC_TIMEOUT = 10.0
+SETTINGS_CHANGED = "plugin.settings.changed"
 EOF = object()
 _ids = itertools.count(1_000_000)
 
@@ -72,6 +73,7 @@ class Runtime:
         self.include_snoozed = False
         self.next_refresh = 0.0
         self.refresh_due = False
+        self.configure_due = False
         # Assume the host may still hold a sort key from an earlier worker, so the first push
         # clears it when this snapshot has nothing Linear to sort by.
         self.sort_key_active = True
@@ -195,6 +197,11 @@ class Runtime:
         method = message.get("method")
         if not isinstance(method, str):
             return
+        if method == SETTINGS_CHANGED:
+            # The host notifies after a settings write; the outer loop re-reads config.get and
+            # repaints, so a toggle such as include_snoozed applies without a worker restart.
+            self.configure_due = True
+            return
         params = message.get("params") or {}
         msg_id = message.get("id")
         try:
@@ -237,6 +244,12 @@ class Runtime:
         if isinstance(value, bool):
             setattr(self, key, value)
 
+    def _apply_settings_change(self) -> None:
+        """Reload settings after a host settings write so the next poll uses the new values."""
+        self.configure_due = False
+        self._configure()
+        self.refresh_due = True
+
     def _scheduled_refresh(self) -> None:
         self.refresh_due = False
         try:
@@ -250,6 +263,8 @@ class Runtime:
         threading.Thread(target=self._read, daemon=True).start()
         self._configure()
         while not self.stopped:
+            if self.configure_due:
+                self._apply_settings_change()
             if self.refresh_due or time.monotonic() >= self.next_refresh:
                 self._scheduled_refresh()
             if self.stopped:
