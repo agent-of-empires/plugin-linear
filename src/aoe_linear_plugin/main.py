@@ -69,6 +69,7 @@ class Runtime:
         self.interval = DEFAULT_REFRESH_SECS
         self.ignore_submodules = True
         self.show_priority = True
+        self.include_snoozed = False
         self.next_refresh = 0.0
         self.refresh_due = False
         # Assume the host may still hold a sort key from an earlier worker, so the first push
@@ -108,16 +109,23 @@ class Runtime:
         return None
 
     def sessions(self) -> list[dict[str, Any]] | None:
-        result = self.call_host("sessions.list", {"exclude": ["archived", "snoozed", "trashed"]})
+        """List the sessions whose Linear row status this worker keeps up to date.
+
+        Archived and trashed sessions have no row at all, so they are always excluded. A
+        snoozed session is still a sunk row in the TUI and the host still serves its UI state,
+        but polling it spends Linear requests on parked work, so keeping its row badge and
+        status column is opt-in through the `include_snoozed` setting.
+        """
+        exclude = ["archived", "trashed"] if self.include_snoozed else ["archived", "snoozed", "trashed"]
+        result = self.call_host("sessions.list", {"exclude": exclude})
         values = result.get("sessions") if isinstance(result, dict) else None
         if not isinstance(values, list):
             return None
         valid = all(isinstance(item, dict) and isinstance(item.get("id"), str) for item in values)
         if not valid:
             return None
-        return [
-            item for item in values if not item.get("archived") and not item.get("snoozed") and not item.get("trashed")
-        ]
+        # Mirror the exclusion list in case the host ignores the request parameter.
+        return [item for item in values if not any(item.get(flag) for flag in exclude)]
 
     def refresh(self, sessions: list[dict[str, Any]] | None = None) -> None:
         sessions = self.sessions() if sessions is None else sessions
@@ -221,6 +229,7 @@ class Runtime:
                     self.interval = DEFAULT_REFRESH_SECS
         self._configure_boolean("ignore_submodules")
         self._configure_boolean("show_priority")
+        self._configure_boolean("include_snoozed")
 
     def _configure_boolean(self, key: str) -> None:
         result = self.call_host("config.get", {"key": key})

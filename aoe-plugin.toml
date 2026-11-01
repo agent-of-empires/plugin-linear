@@ -45,6 +45,14 @@ type = "boolean"
 default = true
 
 [[settings]]
+key = "include_snoozed"
+label = "Show Linear status for snoozed sessions"
+description = "Keep the row badge and status column on snoozed sessions. Off by default, since polling them spends Linear requests on parked work."
+type = "boolean"
+default = false
+advanced = true
+
+[[settings]]
 key = "ignore_submodules"
 label = "Ignore Git submodules"
 description = "Skip nested Git submodules when discovering checkouts."
