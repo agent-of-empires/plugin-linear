@@ -47,7 +47,7 @@ default = true
 [[settings]]
 key = "include_snoozed"
 label = "Show Linear status for snoozed sessions"
-description = "Keep the row badge and status column on snoozed sessions. Off by default, since polling them spends Linear requests on parked work."
+description = "Keep the row badge on snoozed sessions. Off by default, since polling them spends Linear requests on parked work."
 type = "boolean"
 default = false
 advanced = true
@@ -63,22 +63,6 @@ advanced = true
 [[ui]]
 slot = "row-badge"
 id = "linear_issue_badge"
-
-[[ui]]
-slot = "row-column"
-id = "linear_issue_status"
-
-[[ui]]
-slot = "filter-facet"
-id = "linear_workflow"
-
-[[ui]]
-slot = "filter-facet"
-id = "linear_priority"
-
-[[ui]]
-slot = "sort-key"
-id = "linear_issue_attention"
 
 [[ui]]
 slot = "pane"

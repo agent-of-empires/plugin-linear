@@ -34,7 +34,7 @@ def test_community_plugin_status_uses_host_runtime(tmp_path: Path, monkeypatch) 
     assert response["result"]["error"] is None
 
 
-def test_sort_key_is_removed_once_no_session_has_linear_issues() -> None:
+def test_worker_publishes_only_row_badge_and_pane_state() -> None:
     output = io.StringIO()
     runtime = Runtime(stdin=io.StringIO(""), stdout=output)
     unlinked = {"sessions": [{"session_id": "s1", "issues": [], "linked": False, "repos": []}]}
@@ -51,14 +51,9 @@ def test_sort_key_is_removed_once_no_session_has_linear_issues() -> None:
         (message["method"], message["params"]["slot"])
         for message in (json.loads(line) for line in output.getvalue().splitlines())
     ]
-    sort_key_calls = [call for call in calls if call[1] == "sort-key"]
-    assert sort_key_calls == [
-        # Startup clears any sort key an earlier worker left behind, then publishes only while
-        # some session has Linear issues.
-        ("ui.state.remove", "sort-key"),
-        ("ui.state.set", "sort-key"),
-        ("ui.state.remove", "sort-key"),
-    ]
+    # A row is either cleared or given one status glyph; no column and no sort key is involved.
+    assert {slot for _, slot in calls} == {"row-badge", "pane"}
+    assert {method for method, _ in calls} == {"ui.state.set"}
 
 
 def test_community_plugin_open_uses_host_runtime_and_browser_action(monkeypatch) -> None:

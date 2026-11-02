@@ -4,66 +4,21 @@ import json
 
 import pytest
 
-from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, ROW_COLUMN_SLOT, session_payloads
+from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, session_payloads
 
 
-def test_filter_facets_cover_linked_issue_workflow_and_priority() -> None:
+def test_session_payloads_publish_only_a_row_badge_and_pane() -> None:
+    """The row has no identifier or status column, and no sort key or filter facet follows one."""
     snapshot = {
         "sessions": [
-            {
-                "session_id": "s1",
-                "issues": [
-                    {"identifier": "ENG-1", "priority": 1, "state": {"type": "started"}},
-                    {"identifier": "ENG-2", "priority": 4, "state": {"type": "unstarted"}},
-                    {"identifier": "ENG-3", "priority": 0, "state": {"type": "future"}},
-                    {"identifier": "ENG-4", "state": {"type": "completed"}},
-                    {"identifier": "ENG-5", "priority": True, "state": {"type": "triage"}},
-                    {"identifier": "ENG-6", "priority": 5, "state": {"type": "backlog"}},
-                    {"identifier": "ENG-7", "priority": -1, "state": {"type": "canceled"}},
-                ],
-                "repos": [],
-            },
+            {"session_id": "s1", "issues": [{"identifier": "ENG-1", "state": {"type": "started"}}], "repos": []},
             {"session_id": "s2", "issues": [], "repos": []},
         ]
     }
-    payloads = session_payloads(snapshot, {"s1": "ENG-1"}, show_priority=False)
-    facets = [item for item in payloads if item["slot"] == "filter-facet"]
-    assert [item["id"] for item in facets] == ["linear_workflow", "linear_priority"]
-    assert facets[0]["payload"]["column"] == ROW_COLUMN_SLOT[1]
-    assert facets[1]["payload"]["column"] == ROW_COLUMN_SLOT[1]
-    assert [option["value"] for option in facets[0]["payload"]["options"]] == [
-        "state:triage",
-        "state:backlog",
-        "state:unstarted",
-        "state:started",
-        "state:completed",
-        "state:canceled",
-    ]
-    assert [option["value"] for option in facets[1]["payload"]["options"]] == [
-        "priority:0",
-        "priority:1",
-        "priority:2",
-        "priority:3",
-        "priority:4",
-    ]
-    columns = {
-        item["session_id"]: item["payload"]["filter_values"]
-        for item in payloads
-        if item["slot"] == ROW_COLUMN_SLOT[0] and "filter_values" in item["payload"]
-    }
-    assert columns == {
-        "s1": [
-            "priority:0",
-            "priority:1",
-            "priority:4",
-            "state:backlog",
-            "state:canceled",
-            "state:completed",
-            "state:started",
-            "state:triage",
-            "state:unstarted",
-        ]
-    }
+    payloads = session_payloads(snapshot, {"s1": "ENG-1"})
+
+    assert [item["slot"] for item in payloads] == [ROW_BADGE_SLOT[0], PANE_SLOT[0], ROW_BADGE_SLOT[0], PANE_SLOT[0]]
+    assert [item["session_id"] for item in payloads] == ["s1", "s1", "s2", "s2"]
 
 
 def test_session_ui_shows_linear_status_and_selectable_linked_issues(recorded_linear_responses) -> None:
@@ -95,17 +50,16 @@ def test_session_ui_shows_linear_status_and_selectable_linked_issues(recorded_li
     payloads = session_payloads(snapshot, {"s1": "ENG-1"})
     by_slot = {item["slot"]: item["payload"] for item in payloads if item.get("session_id") == "s1"}
 
-    assert by_slot[ROW_BADGE_SLOT[0]]["items"][0]["text"] == "ENG-1"
-    assert by_slot[ROW_BADGE_SLOT[0]]["items"][0]["icon"] == "circle-dot"
-    assert by_slot[ROW_COLUMN_SLOT[0]]["text"] == "Started"
-    assert by_slot[ROW_COLUMN_SLOT[0]]["tooltip"] == "In Progress · Urgent"
-    assert by_slot[ROW_BADGE_SLOT[0]]["items"][0]["tone"] == "info"
+    assert set(by_slot) == {ROW_BADGE_SLOT[0], PANE_SLOT[0]}
+    assert by_slot[ROW_BADGE_SLOT[0]]["items"] == [
+        {
+            "text": "◐",
+            "tone": "info",
+            "href": "https://linear.app/acme/issue/ENG-1",
+            "tooltip": "In Progress · Urgent",
+        }
+    ]
     assert by_slot[ROW_BADGE_SLOT[0]]["href"] == "https://linear.app/acme/issue/ENG-1"
-    assert payloads[0]["payload"] == {
-        "label": "Linear issue attention",
-        "column": ROW_COLUMN_SLOT[1],
-        "direction": "asc",
-    }
 
     pane = by_slot[PANE_SLOT[0]]
     callout = next(block for block in pane["blocks"] if block.get("kind") == "callout")
@@ -126,13 +80,13 @@ def test_session_ui_shows_linear_status_and_selectable_linked_issues(recorded_li
     assert comments["children"] == [{"kind": "comment", "author": "A User", "body": "The fix is ready."}]
 
 
-def test_issue_state_icons_follow_linear_workflow_types() -> None:
+def test_row_badge_is_one_glyph_per_linear_workflow_type() -> None:
     states = [
-        ("backlog", "circle-dashed"),
-        ("unstarted", "circle"),
-        ("started", "circle-dot"),
-        ("completed", "circle-check"),
-        ("canceled", "circle-x"),
+        ("backlog", "◌"),
+        ("unstarted", "○"),
+        ("started", "◐"),
+        ("completed", "●"),
+        ("canceled", "✕"),
     ]
     snapshot = {
         "sessions": [
@@ -145,10 +99,10 @@ def test_issue_state_icons_follow_linear_workflow_types() -> None:
         ]
     }
 
-    icons = [
-        item["payload"]["items"][0]["icon"] for item in session_payloads(snapshot) if item["slot"] == ROW_BADGE_SLOT[0]
+    glyphs = [
+        item["payload"]["items"][0]["text"] for item in session_payloads(snapshot) if item["slot"] == ROW_BADGE_SLOT[0]
     ]
-    assert icons == [expected_icon for _, expected_icon in states]
+    assert glyphs == [glyph for _, glyph in states]
 
 
 def test_no_issue_shows_api_error_without_fabricating_issue_state() -> None:
@@ -159,9 +113,7 @@ def test_no_issue_shows_api_error_without_fabricating_issue_state() -> None:
     }
     payloads = session_payloads(snapshot)
     by_slot = {item["slot"]: item["payload"] for item in payloads if item.get("session_id") == "s1"}
-    assert by_slot[ROW_BADGE_SLOT[0]]["items"][0]["text"] == "Linear error"
-    assert by_slot[ROW_BADGE_SLOT[0]]["items"][0]["tone"] == "danger"
-    assert by_slot[ROW_COLUMN_SLOT[0]]["tone"] == "danger"
+    assert by_slot[ROW_BADGE_SLOT[0]]["items"] == [{"text": "!", "tone": "danger", "tooltip": "API unavailable"}]
     assert any(block.get("title") == "Linear unavailable" for block in by_slot[PANE_SLOT[0]]["blocks"])
 
 
@@ -198,8 +150,8 @@ def test_stale_cache_is_visible_in_row_and_pane() -> None:
     payloads = session_payloads(snapshot)
     by_slot = {item["slot"]: item["payload"] for item in payloads if item.get("session_id") == "s1"}
     assert by_slot[ROW_BADGE_SLOT[0]]["items"][-1]["text"] == "stale"
-    # The labelled chip carries staleness; the status text keeps its workflow tone.
-    assert by_slot[ROW_COLUMN_SLOT[0]]["tone"] == "neutral"
+    # The labelled chip carries staleness; the status glyph keeps its workflow tone.
+    assert by_slot[ROW_BADGE_SLOT[0]]["items"][0]["tone"] == "neutral"
     assert by_slot[PANE_SLOT[0]]["blocks"][0]["tone"] == "warn"
 
 
@@ -222,11 +174,7 @@ def test_row_status_color_follows_the_workflow_state_not_priority() -> None:
     }
     payloads = session_payloads(snapshot)
 
-    columns = {item["session_id"]: item["payload"] for item in payloads if item["slot"] == ROW_COLUMN_SLOT[0]}
     badges = {item["session_id"]: item["payload"]["items"][0] for item in payloads if item["slot"] == ROW_BADGE_SLOT[0]}
-    assert {sid: column["tone"] for sid, column in columns.items()} == {
-        f"s{index}": tone for index, (_, _, tone) in enumerate(states)
-    }
     assert {sid: badge["tone"] for sid, badge in badges.items()} == {
         f"s{index}": tone for index, (_, _, tone) in enumerate(states)
     }
@@ -247,7 +195,7 @@ def test_empty_stale_error_does_not_claim_cached_data() -> None:
     payloads = session_payloads(snapshot)
     by_slot = {item["slot"]: item["payload"] for item in payloads if item.get("session_id") == "s1"}
 
-    assert [item["text"] for item in by_slot[ROW_BADGE_SLOT[0]]["items"]] == ["Linear error"]
+    assert [item["text"] for item in by_slot[ROW_BADGE_SLOT[0]]["items"]] == ["!"]
     assert [block.get("title") for block in by_slot[PANE_SLOT[0]]["blocks"]] == ["Linear unavailable"]
 
 
@@ -338,23 +286,10 @@ def test_session_without_linear_work_publishes_no_linear_state() -> None:
     payloads = session_payloads(snapshot)
 
     session_payloads_by_slot = [item["slot"] for item in payloads if item.get("session_id") == "s1"]
-    assert session_payloads_by_slot == [ROW_BADGE_SLOT[0], ROW_COLUMN_SLOT[0], PANE_SLOT[0]]
+    assert session_payloads_by_slot == [ROW_BADGE_SLOT[0], PANE_SLOT[0]]
     by_slot = {item["slot"]: item["payload"] for item in payloads if item.get("session_id") == "s1"}
     assert by_slot[ROW_BADGE_SLOT[0]] == {"items": []}
-    assert by_slot[ROW_COLUMN_SLOT[0]] == {}
     assert not any(block.get("tone") in {"warn", "danger"} for block in by_slot[PANE_SLOT[0]]["blocks"])
-
-
-def test_sort_key_is_published_only_while_some_session_has_linear_issues() -> None:
-    unlinked = {"sessions": [{"session_id": "s1", "issues": [], "linked": False, "repos": []}]}
-    linked = {"sessions": [{"session_id": "s1", "issues": [{"identifier": "ENG-1"}], "repos": []}]}
-
-    assert all(item["slot"] != "sort-key" for item in session_payloads(unlinked))
-    assert session_payloads(linked)[0]["payload"] == {
-        "label": "Linear issue attention",
-        "column": ROW_COLUMN_SLOT[1],
-        "direction": "asc",
-    }
 
 
 def test_attachment_with_null_subtitle_renders_without_a_null_label() -> None:
