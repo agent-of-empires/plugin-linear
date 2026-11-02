@@ -22,20 +22,15 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn
 - `Linear: open issue` opens the issue currently shown on the session row.
 - Branch resolution combines Linear's issue `branchName` metadata with up to five distinct issue identifiers embedded in branch names (for example `feature/ENG-123-add-cache`). A failed speculative GraphQL lookup (such as `UTF-8` in a branch name) does not discard other matches. Authentication, transport, and rate-limit failures remain visible. Multiple matches are shown in the pane; the selected issue can be changed there.
 - Session refresh considers the session checkout and host-provided `workspace_repos`, deduplicates repeated issue records, and keeps prior UI state while sessions are unavailable.
-- The row badge links to the selected issue and shows its Linear workflow-state glyph; the status column shows only its workflow state; sorting ranks urgent/high/started issues ahead of completed issues.
+- The session row carries one Linear badge and nothing else: a single workflow-state glyph (`◌` backlog, `○` todo, `◐` in progress, `●` done, `×` canceled) tinted by that state and linked to the selected issue. It shows no issue identifier and no status column, so the row stays quiet; the pane carries identifiers, titles, and details.
 - Pane details include issue status, priority, team, assignee, project, cycle, description, up to 10 recent comments, and attached resources. The selected issue appears in the pane header; the selector lists only alternate issues. Attachments may include linked pull requests when Linear has attached them.
 - Keeps previously loaded issue data visible and marks it stale when refresh fails.
 - Shows an unavailable state when a refresh fails before any issue data is cached.
-- Treats a checkout as not using Linear when its branch names no Linear issue, so a missing key or a failed request shows a neutral state instead of an error badge, column, or callout.
-- Coexists with the GitHub plugin: sessions without Linear work get a cleared Linear badge and status column, and the Linear sort option is only published while some session has a Linear issue.
+- Treats a checkout as not using Linear when its branch names no Linear issue, so a missing key or a failed request shows a neutral state instead of an error badge or callout.
+- Coexists with the GitHub plugin: sessions without Linear work get a cleared Linear badge, so the row is left to whatever else claims it.
 - Session panes stay under the host's 64 KiB payload limit by dropping older comments, then truncating long descriptions when needed.
 
-The session row exposes Linear workflow and priority as filter facets for the dashboard and Kanban Board. Facet values include every linked issue in that session, not only the selected issue; refreshes with cached issue data keep those values. The filter contract:
-
-| Facet id | Label | Column | Values |
-|---|---|---|---|
-| `linear_workflow` | Linear workflow | `linear_issue_status` | `state:triage`, `state:backlog`, `state:unstarted`, `state:started`, `state:completed`, `state:canceled` |
-| `linear_priority` | Linear priority | `linear_issue_status` | `priority:0` (No priority) through `priority:4` (Low) |
+The plugin declares only a `row-badge` and a `pane`. It publishes no status column, sort key, or filter facet, so Linear adds no column, sort option, or filter to the dashboard's toolbar; workflow and priority are readable in the pane.
 
 ## Install from source
 
@@ -55,7 +50,7 @@ Linear is an issue tracker, not a source-control or CI provider. This plugin rep
 
 - **Refresh interval**: 0–86400 seconds (default 120); zero disables background polling.
 - **Show priority**: controls priority badges in the issue selector.
-- **Show Linear status for snoozed sessions** (`include_snoozed`, off by default): the session list keeps a snoozed session as a sunk row, and turning this on keeps its Linear row badge and status column live. It costs Linear requests for parked work, since every poll re-queries those branches.
+- **Show Linear status for snoozed sessions** (`include_snoozed`, off by default): the session list keeps a snoozed session as a sunk row, and turning this on keeps its Linear row badge live. It costs Linear requests for parked work, since every poll re-queries those branches.
 - **Ignore Git submodules**: excludes initialized nested child submodules during checkout discovery; the session's primary checkout is retained.
 
 Settings writes reach the running worker as the host's `plugin.settings.changed` notification, so a change applies on the next poll without restarting the worker.

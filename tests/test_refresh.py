@@ -7,7 +7,7 @@ from pathlib import Path
 import httpx
 
 from aoe_linear_plugin import refresh
-from aoe_linear_plugin.uistate import ROW_COLUMN_SLOT, session_payloads
+from aoe_linear_plugin.uistate import ROW_BADGE_SLOT, session_payloads
 
 
 def _checkout(path: Path, branch: str) -> None:
@@ -150,8 +150,8 @@ def test_http_failure_marks_last_good_issue_data_stale(monkeypatch, tmp_path: Pa
     assert [issue["identifier"] for issue in snapshot["sessions"][0]["issues"]] == ["ENG-1"]
     assert snapshot["sessions"][0]["stale"] is True
     assert snapshot["sessions"][0]["repos"][0]["error"]["kind"] == "network"
-    column = next(item["payload"] for item in session_payloads(snapshot) if item["slot"] == ROW_COLUMN_SLOT[0])
-    assert column["filter_values"] == ["priority:1", "state:started"]
+    badge = next(item["payload"] for item in session_payloads(snapshot) if item["slot"] == ROW_BADGE_SLOT[0])
+    assert badge["items"][0]["text"] == "◐"
 
 
 def test_http_rate_limit_sets_retry_backoff(monkeypatch, tmp_path: Path) -> None:

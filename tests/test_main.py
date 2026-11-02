@@ -157,7 +157,7 @@ def test_snoozed_session_keeps_row_status_when_opted_in(tmp_path: Path, monkeypa
         for message in (json.loads(line) for line in output.getvalue().splitlines())
         if message.get("method") == "ui.state.set" and message["params"].get("session_id") == "s1"
     ]
-    assert {"row-badge", "row-column"} <= {item["slot"] for item in pushed}
+    assert {item["slot"] for item in pushed} == {"row-badge", "pane"}
 
 
 def test_snoozed_session_row_status_is_opt_in(tmp_path: Path, monkeypatch) -> None:
@@ -224,7 +224,7 @@ def test_settings_change_notification_reloads_snoozed_setting(tmp_path: Path, mo
         for message in (json.loads(line) for line in output.getvalue().splitlines())
         if message.get("method") == "ui.state.set" and message["params"].get("session_id") == "s1"
     ]
-    assert {"row-badge", "row-column"} <= set(pushed)
+    assert set(pushed) == {"row-badge", "pane"}
 
 
 def test_issue_selection_repaints_cached_pane_without_network() -> None:
