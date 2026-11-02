@@ -130,6 +130,103 @@ def test_manual_refresh_repaints_all_active_session_panes(monkeypatch) -> None:
     assert {pane["session_id"] for pane in panes} == {"s1", "s2"}
 
 
+def test_snoozed_session_keeps_row_status_when_opted_in(tmp_path: Path, monkeypatch) -> None:
+    """Opted in, the TUI keeps a snoozed session as a sunk row, so its Linear status must persist."""
+    subprocess.run(["git", "init", "-b", "ENG-7-snoozed", str(tmp_path)], check=True, capture_output=True)
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    monkeypatch.delenv("LINEAR_TOKEN", raising=False)
+    output = io.StringIO()
+    runtime = Runtime(stdin=io.StringIO(""), stdout=output)
+    host_calls = []
+    config = {"ui_refresh_secs": 0, "ignore_submodules": True, "show_priority": True, "include_snoozed": True}
+
+    def call_host(method, params, timeout=worker.RPC_TIMEOUT):
+        host_calls.append((method, params))
+        if method == "config.get":
+            return {"value": config.get(params["key"], "")}
+        return {"sessions": [{"id": "s1", "project_path": str(tmp_path), "snoozed": True}]}
+
+    monkeypatch.setattr(runtime, "call_host", call_host)
+    runtime._configure()
+    runtime.refresh()
+
+    exclude = next(params["exclude"] for method, params in host_calls if method == "sessions.list")
+    assert exclude == ["archived", "trashed"]
+    pushed = [
+        message["params"]
+        for message in (json.loads(line) for line in output.getvalue().splitlines())
+        if message.get("method") == "ui.state.set" and message["params"].get("session_id") == "s1"
+    ]
+    assert {"row-badge", "row-column"} <= {item["slot"] for item in pushed}
+
+
+def test_snoozed_session_row_status_is_opt_in(tmp_path: Path, monkeypatch) -> None:
+    """Without the setting, a snoozed session gets no Linear row status even if the host ignores exclude."""
+    subprocess.run(["git", "init", "-b", "ENG-7-snoozed", str(tmp_path)], check=True, capture_output=True)
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    monkeypatch.delenv("LINEAR_TOKEN", raising=False)
+    output = io.StringIO()
+    runtime = Runtime(stdin=io.StringIO(""), stdout=output)
+    host_calls = []
+
+    def call_host(method, params, timeout=worker.RPC_TIMEOUT):
+        host_calls.append((method, params))
+        return {"sessions": [{"id": "s1", "project_path": str(tmp_path), "snoozed": True}]}
+
+    monkeypatch.setattr(runtime, "call_host", call_host)
+    runtime.refresh()
+
+    exclude = next(params["exclude"] for method, params in host_calls if method == "sessions.list")
+    assert exclude == ["archived", "snoozed", "trashed"]
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert not [message for message in messages if message["params"].get("session_id") == "s1"]
+
+
+def test_settings_change_notification_reloads_snoozed_setting(tmp_path: Path, monkeypatch) -> None:
+    """The host notifies on a settings write, so a toggled include_snoozed must apply without a restart."""
+    subprocess.run(["git", "init", "-b", "ENG-7-snoozed", str(tmp_path)], check=True, capture_output=True)
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    monkeypatch.delenv("LINEAR_TOKEN", raising=False)
+    output = io.StringIO()
+    runtime = Runtime(stdin=io.StringIO(""), stdout=output)
+    config = {"ui_refresh_secs": 0, "ignore_submodules": True, "show_priority": True, "include_snoozed": False}
+    excludes = []
+
+    def call_host(method, params, timeout=worker.RPC_TIMEOUT):
+        if method == "config.get":
+            return {"value": config.get(params["key"], ""), "revision": 1}
+        excludes.append(params["exclude"])
+        return {"sessions": [{"id": "s1", "project_path": str(tmp_path), "snoozed": True}]}
+
+    monkeypatch.setattr(runtime, "call_host", call_host)
+    runtime._configure()
+    assert runtime.include_snoozed is False
+    assert output.getvalue() == ""
+
+    config["include_snoozed"] = True
+    runtime.handle(
+        {
+            "jsonrpc": "2.0",
+            "method": worker.SETTINGS_CHANGED,
+            "params": {"revision": 2, "changed_keys": ["include_snoozed"]},
+        }
+    )
+    assert runtime.configure_due is True
+    assert output.getvalue() == "", "a settings notification must not be answered"
+
+    runtime._apply_settings_change()
+    runtime.refresh()
+
+    assert runtime.include_snoozed is True
+    assert excludes == [["archived", "trashed"]]
+    pushed = [
+        message["params"]["slot"]
+        for message in (json.loads(line) for line in output.getvalue().splitlines())
+        if message.get("method") == "ui.state.set" and message["params"].get("session_id") == "s1"
+    ]
+    assert {"row-badge", "row-column"} <= set(pushed)
+
+
 def test_issue_selection_repaints_cached_pane_without_network() -> None:
     output = io.StringIO()
     runtime = Runtime(stdin=io.StringIO(""), stdout=output)
