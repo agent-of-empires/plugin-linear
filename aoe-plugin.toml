@@ -3,7 +3,7 @@ name = "Linear"
 version = "0.1.0"
 api_version = 7
 aoe_version = ">=1.20.0, <2.0.0"
-description = "Resolve Linear issues linked to git branches and open their URLs."
+description = "Resolve Linear issues linked to git branches, commits, and pull requests, and open their URLs."
 icon = "circle-dot"
 icon_asset = "assets/linear-icon.png"
 capabilities = ["runtime.worker", "net", "session.read", "process.spawn", "fs.read", "browser_open"]
@@ -43,6 +43,14 @@ label = "Show issue priority in the pane"
 description = "Include Linear priority badges in the issue selector."
 type = "boolean"
 default = true
+
+[[settings]]
+key = "use_pull_requests"
+label = "Read Linear links from pull request text"
+description = "When a branch, its recent commits, and the session title name no Linear issue, ask the GitHub CLI for the branch's pull request title, body, and comments. Requires `gh`; results are cached per commit for 10 minutes."
+type = "boolean"
+default = true
+advanced = true
 
 [[settings]]
 key = "include_snoozed"

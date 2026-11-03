@@ -63,6 +63,7 @@ class Runtime:
         self.interval = DEFAULT_REFRESH_SECS
         self.ignore_submodules = True
         self.show_priority = True
+        self.use_pull_requests = True
         self.include_snoozed = False
         self.next_refresh = 0.0
         self.refresh_due = False
@@ -123,7 +124,11 @@ class Runtime:
         sessions = self.sessions() if sessions is None else sessions
         if sessions is None or self.stopped:
             return
-        self.snapshot = refresh_data.build_snapshot(sessions, ignore_submodules=self.ignore_submodules)
+        self.snapshot = refresh_data.build_snapshot(
+            sessions,
+            ignore_submodules=self.ignore_submodules,
+            use_pull_requests=self.use_pull_requests,
+        )
         self._push()
         active = {item.get("session_id") for item in self.snapshot.get("sessions", [])}
         self._remove_vanished(active)
@@ -148,12 +153,25 @@ class Runtime:
             if not isinstance(path, str) or (selected is not None and not isinstance(selected, str)):
                 raise ValueError("path and selected must be strings")
             if method == "plugin.community.linear.status":
-                return linear_status(path, selected=selected)
-            return linear_open(path, selected=selected, open_browser=True)
+                return linear_status(path, selected=selected, use_pull_requests=self.use_pull_requests)
+            return linear_open(
+                path,
+                selected=selected,
+                open_browser=True,
+                use_pull_requests=self.use_pull_requests,
+            )
         if method == "linear.status":
-            return linear_status(_path(params), selected=params.get("issue"))
+            return linear_status(
+                _path(params),
+                selected=params.get("issue"),
+                use_pull_requests=self.use_pull_requests,
+            )
         if method in ("linear.open", "plugin.community.linear.open"):
-            return linear_open(_path(params), selected=params.get("issue"))
+            return linear_open(
+                _path(params),
+                selected=params.get("issue"),
+                use_pull_requests=self.use_pull_requests,
+            )
         if method in ("linear.refresh", "plugin.community.linear.refresh", SELECT_METHOD):
             return {"accepted": True}
         raise UnknownMethodError(method)
@@ -211,6 +229,7 @@ class Runtime:
                     self.interval = DEFAULT_REFRESH_SECS
         self._configure_boolean("ignore_submodules")
         self._configure_boolean("show_priority")
+        self._configure_boolean("use_pull_requests")
         self._configure_boolean("include_snoozed")
 
     def _configure_boolean(self, key: str) -> None:
