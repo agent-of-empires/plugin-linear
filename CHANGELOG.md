@@ -2,6 +2,10 @@
 
 ## 0.1.0
 
+- Match Linear identifiers whose team key starts with a digit (`0DIN-2360`), which worktree branches such as `athal/0din-2360-...` previously never resolved.
+- Fall back to AoE session titles and recent commit subjects when a worktree branch is a slug with no Linear identifier in it.
+- Read the branch's pull request title, body, and comments with `gh` when local hints name no issue, cached per commit and opt-out with the `use_pull_requests` setting.
+
 - Initial Linear GraphQL plugin with branch-linked issue lookup, multi-checkout discovery, worker commands, session UI, and configurable polling.
 - Use Linear workflow icons and colors, render comments and attached resources, and avoid duplicating the selected issue in its selector.
 - Preserve valid branch matches when speculative identifiers fail, and bound speculative lookups to five.

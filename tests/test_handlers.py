@@ -58,6 +58,33 @@ def test_open_reports_a_linked_branch_whose_issue_is_missing(tmp_path: Path) -> 
         linear_open(str(tmp_path), env={"LINEAR_API_KEY": "token"}, transport=transport)
 
 
+def test_status_falls_back_to_pull_request_text(tmp_path: Path, monkeypatch) -> None:
+    subprocess.run(["git", "init", "-b", "status", str(tmp_path)], check=True, capture_output=True)
+
+    def pull_request_hints(*_args, **_kwargs):
+        return ["Fixes 0DIN-2361"]
+
+    monkeypatch.setattr("aoe_linear_plugin.handlers.pull_request_hints", pull_request_hints)
+
+    def response(request: httpx.Request) -> httpx.Response:
+        body = request.content.decode()
+        issue = {"id": "i2", "identifier": "0DIN-2361", "title": "Status replies", "state": {"name": "In Progress"}}
+        if "issueVcsBranchSearch" in body:
+            return httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}})
+        if '"0DIN-2361"' in body:
+            return httpx.Response(200, json={"data": {"issue": issue}})
+        return httpx.Response(200, json={"data": None, "errors": [{"message": "Entity not found: Issue"}]})
+
+    status = linear_status(
+        str(tmp_path),
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(response),
+    )
+
+    assert status["summary"] == "0DIN-2361: Status replies (In Progress)"
+    assert status["linked"] is True
+
+
 def test_status_uses_branch_issue_identifier_and_summarizes_state(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-b", "feature/ENG-7-do-work", str(tmp_path)], check=True, capture_output=True)
 

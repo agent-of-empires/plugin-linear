@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import time
 from typing import Any
 
 GIT_TIMEOUT = 2.0
+COMMIT_HINT_LIMIT = 30
+GH_TIMEOUT = 5.0
+PR_HINT_TTL = 600.0
+MAX_PR_HINTS = 4
+
+# ``(path, branch) -> (expires_at, head, hints)``. Pull request text changes rarely, and a poll
+# must not re-run ``gh`` for every slug-named branch, so a lookup is reused until the checkout's
+# HEAD moves or the TTL lapses. The worker refreshes from one thread, so a plain dict is enough.
+_pr_cache: dict[tuple[str, str], tuple[float, str, list[str]]] = {}
 
 
 def _git(path: str, *args: str) -> str | None:
@@ -57,6 +68,95 @@ def _checkout(
         return None
     branch = candidate["branch"] or _git(path, "symbolic-ref", "--quiet", "--short", "HEAD")
     return {"path": path, "branch": branch} if branch else None
+
+
+def _gh(path: str, *args: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["gh", *args],
+            cwd=path,
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def _pull_request_texts(pull_request: dict[str, Any]) -> list[str]:
+    """Title, body, and comment text of one pull request."""
+    texts: list[str] = []
+    for key in ("title", "body"):
+        value = pull_request.get(key)
+        if isinstance(value, str) and value.strip():
+            texts.append(value)
+    comments = pull_request.get("comments")
+    if isinstance(comments, list):
+        for comment in comments:
+            if not isinstance(comment, dict):
+                continue
+            body = comment.get("body")
+            if isinstance(body, str) and body.strip():
+                texts.append(body)
+    return texts
+
+
+def _pull_request_text(path: str, branch: str) -> list[str]:
+    """Pull request title, body, and comment text for the branch, newest PRs first."""
+    output = _gh(
+        path,
+        "pr",
+        "list",
+        "--head",
+        branch,
+        "--state",
+        "all",
+        "--limit",
+        "5",
+        "--json",
+        "number,title,body,comments",
+    )
+    if not output:
+        return []
+    try:
+        pull_requests = json.loads(output)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(pull_requests, list):
+        return []
+    hints: list[str] = []
+    for pull_request in pull_requests:
+        if isinstance(pull_request, dict):
+            hints.extend(_pull_request_texts(pull_request))
+        if len(hints) >= MAX_PR_HINTS:
+            break
+    return hints[:MAX_PR_HINTS]
+
+
+def pull_request_hints(path: str, branch: str) -> list[str]:
+    """Free text from the branch's pull requests, cached per commit for ``PR_HINT_TTL``.
+
+    A worktree branch can be a slug of the task title while its pull request names the Linear
+    issue. ``gh`` is optional: when it is missing, unauthenticated, or the branch has no pull
+    request, the empty result is cached too so polling does not keep re-running it.
+    """
+    head = _git(path, "rev-parse", "HEAD") or ""
+    key = (path, branch)
+    moment = time.monotonic()
+    cached = _pr_cache.get(key)
+    if cached and cached[0] > moment and cached[1] == head:
+        return list(cached[2])
+    hints = _pull_request_text(path, branch)
+    _pr_cache[key] = (moment + PR_HINT_TTL, head, hints)
+    return list(hints)
+
+
+def commit_messages(path: str, limit: int = COMMIT_HINT_LIMIT) -> list[str]:
+    """Recent commit subjects, newest first, as extra hints for issue identifiers."""
+    output = _git(path, "log", f"-n{limit}", "--no-color", "--format=%s")
+    return [line.strip() for line in (output or "").splitlines() if line.strip()]
 
 
 def discover_checkouts(session: dict[str, Any], *, ignore_submodules: bool = True) -> list[dict[str, str]]:

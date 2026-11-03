@@ -3,7 +3,7 @@
 Refresh failures keep previously loaded issue data visible and mark it stale.
 A failure before any issue data is cached is shown as unavailable, not stale.
 
-The Linear plugin resolves issue state for session branches and displays it in the session list and a Linear pane. It uses Linear's GraphQL API directly; it does not shell out to `linear` or `gh`.
+The Linear plugin resolves issue state for session branches and displays it in the session list and a Linear pane. It uses Linear's GraphQL API directly and does not shell out to `linear`. When a branch, its recent commits, and the session title name no issue, it can ask the GitHub CLI (`gh`) for the branch's pull request title, body, and comments and read a Linear link from that text; this lookup is optional, cached per commit, and controlled by the `use_pull_requests` setting.
 
 ## Install and authenticate
 
@@ -20,13 +20,13 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn
 - `Linear: status` returns the branch and its linked issues, with actionable auth/network/GraphQL errors.
 - `Linear: refresh` schedules an update of all active session panes in the worker's outer loop; the plugin polls at the configurable interval (default 120 seconds, `0` disables polling). Each refresh reuses one HTTP client. A rate limit stops remaining requests, retains completed results, and uses last-good state until the advertised reset time.
 - `Linear: open issue` opens the issue currently shown on the session row.
-- Branch resolution combines Linear's issue `branchName` metadata with up to five distinct issue identifiers embedded in branch names (for example `feature/ENG-123-add-cache`). A failed speculative GraphQL lookup (such as `UTF-8` in a branch name) does not discard other matches. Authentication, transport, and rate-limit failures remain visible. Multiple matches are shown in the pane; the selected issue can be changed there.
+- Branch resolution combines Linear's issue `branchName` metadata with up to five distinct issue identifiers embedded in branch names (for example `feature/ENG-123-add-cache`), including team keys that start with a digit (`athal/0din-2360-...`). When a worktree branch is a slug of the task title instead (for example `litellm`), up to three identifiers from recent commit subjects and the AoE session title are tried as well. If those name no issue, the branch's pull request title, body, and comments are read with `gh pr list` and tried as the last resort; the lookup is skipped when `gh` is missing or unauthenticated and cached per commit for 10 minutes so polling does not repeat it. A failed speculative GraphQL lookup (such as `UTF-8` in a branch name) does not discard other matches. Authentication, transport, and rate-limit failures remain visible. Multiple matches are shown in the pane; the selected issue can be changed there.
 - Session refresh considers the session checkout and host-provided `workspace_repos`, deduplicates repeated issue records, and keeps prior UI state while sessions are unavailable.
 - The session row carries one Linear badge and nothing else: a single workflow-state glyph (`◌` backlog, `○` todo, `◐` in progress, `●` done, `×` canceled) tinted by that state and linked to the selected issue. It shows no issue identifier and no status column, so the row stays quiet; the pane carries identifiers, titles, and details.
 - Pane details include issue status, priority, team, assignee, project, cycle, description, up to 10 recent comments, and attached resources. The selected issue appears in the pane header; the selector lists only alternate issues. Attachments may include linked pull requests when Linear has attached them.
 - Keeps previously loaded issue data visible and marks it stale when refresh fails.
 - Shows an unavailable state when a refresh fails before any issue data is cached.
-- Treats a checkout as not using Linear when its branch names no Linear issue, so a missing key or a failed request shows a neutral state instead of an error badge or callout.
+- Treats a checkout as not using Linear when neither its branch, its recent commit subjects, nor the session title names a Linear issue, so a missing key or a failed request shows a neutral state instead of an error badge or callout.
 - Coexists with the GitHub plugin: sessions without Linear work get a cleared Linear badge, so the row is left to whatever else claims it.
 - Session panes stay under the host's 64 KiB payload limit by dropping older comments, then truncating long descriptions when needed.
 
@@ -50,6 +50,7 @@ Linear is an issue tracker, not a source-control or CI provider. This plugin rep
 
 - **Refresh interval**: 0–86400 seconds (default 120); zero disables background polling.
 - **Show priority**: controls priority badges in the issue selector.
+- **Read Linear links from pull request text** (`use_pull_requests`, on by default): allows one cached `gh pr list` lookup per unresolved checkout, used only when the branch, its recent commits, and the session title name no Linear issue. Turn it off to keep the plugin entirely on the Linear API.
 - **Show Linear status for snoozed sessions** (`include_snoozed`, off by default): the session list keeps a snoozed session as a sunk row, and turning this on keeps its Linear row badge live. It costs Linear requests for parked work, since every poll re-queries those branches.
 - **Ignore Git submodules**: excludes initialized nested child submodules during checkout discovery; the session's primary checkout is retained.
 

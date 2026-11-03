@@ -7,7 +7,14 @@ import pytest
 
 from aoe_linear_plugin.client import LinearClient
 from aoe_linear_plugin.errors import LinearGraphQLError, LinearRateLimitError
-from aoe_linear_plugin.resolver import branch_is_linear, identifiers_in_branch, resolve_branch, selected_issue
+from aoe_linear_plugin.resolver import (
+    branch_is_linear,
+    hint_identifiers,
+    identifiers_in_branch,
+    identifiers_in_text,
+    resolve_branch,
+    selected_issue,
+)
 
 
 def test_branch_identifiers_are_normalized_deduplicated_and_bounded() -> None:
@@ -29,6 +36,14 @@ def test_dependency_branches_are_not_treated_as_linear_work() -> None:
 def test_dotted_issue_branches_still_name_their_issue() -> None:
     assert identifiers_in_branch("feature/ENG-12.fix") == ["ENG-12"]
     assert identifiers_in_branch("dependabot/pip/httpx-0.27.0") == []
+
+
+def test_team_keys_may_start_with_a_digit() -> None:
+    assert identifiers_in_branch("athal/0din-2360-enforce-unreleased-registration") == ["0DIN-2360"]
+    assert branch_is_linear("athal/0din-2360-enforce-unreleased-registration") is True
+    assert identifiers_in_text("Odin 0DIN-2360 unreleased-only registration") == ["0DIN-2360"]
+    # A bare number range is not a team key.
+    assert identifiers_in_text("bump 123-456") == []
 
 
 def test_resolve_branch_combines_branch_metadata_and_identifiers() -> None:
@@ -96,6 +111,34 @@ def test_speculative_lookup_count_is_bounded() -> None:
     with LinearClient("key", transport=httpx.MockTransport(respond)) as client:
         assert resolve_branch(client, "-".join(f"ISSUE-{i}" for i in range(1, 20))) == []
     assert requested == ["ISSUE-1", "ISSUE-2", "ISSUE-3", "ISSUE-4", "ISSUE-5"]
+
+
+def test_hints_find_the_issue_when_the_branch_carries_no_identifier() -> None:
+    requested = []
+
+    def respond(request):
+        variables = json.loads(request.content)["variables"]
+        if "branchName" in variables:
+            return httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}})
+        requested.append(variables["id"])
+        if variables["id"] == "0DIN-2360":
+            return httpx.Response(200, json={"data": {"issue": {"id": "7", "identifier": "0DIN-2360"}}})
+        return httpx.Response(200, json={"data": None, "errors": [{"message": "Entity not found: Issue"}]})
+
+    with LinearClient("key", transport=httpx.MockTransport(respond)) as client:
+        issues = resolve_branch(
+            client,
+            "athal/pr-85-work",
+            hints=["Odin 0DIN-2360 unreleased-only registration", "chore: tidy"],
+        )
+
+    assert requested == ["PR-85", "0DIN-2360"]
+    assert [issue["identifier"] for issue in issues] == ["0DIN-2360"]
+
+
+def test_hint_lookups_are_bounded_and_deduplicated() -> None:
+    hints = [f"issue {index} for ENG-{index}" for index in range(1, 10)]
+    assert hint_identifiers([*hints, "ENG-2"]) == ["ENG-1", "ENG-2", "ENG-3"]
 
 
 def test_branch_search_errors_and_identifier_rate_limits_are_not_hidden() -> None:
