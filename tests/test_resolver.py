@@ -136,6 +136,23 @@ def test_hints_find_the_issue_when_the_branch_carries_no_identifier() -> None:
     assert [issue["identifier"] for issue in issues] == ["0DIN-2360"]
 
 
+def test_hints_are_ignored_once_the_branch_names_an_issue() -> None:
+    requested = []
+
+    def respond(request):
+        variables = json.loads(request.content)["variables"]
+        if "branchName" in variables:
+            return httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}})
+        requested.append(variables["id"])
+        return httpx.Response(200, json={"data": {"issue": {"id": "3", "identifier": "ENG-2"}}})
+
+    with LinearClient("key", transport=httpx.MockTransport(respond)) as client:
+        issues = resolve_branch(client, "eng-2-do-work", hints=["unrelated ENG-9 cleanup"])
+
+    assert requested == ["ENG-2"]
+    assert [issue["identifier"] for issue in issues] == ["ENG-2"]
+
+
 def test_hint_lookups_are_bounded_and_deduplicated() -> None:
     hints = [f"issue {index} for ENG-{index}" for index in range(1, 10)]
     assert hint_identifiers([*hints, "ENG-2"]) == ["ENG-1", "ENG-2", "ENG-3"]

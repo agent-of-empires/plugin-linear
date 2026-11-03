@@ -85,6 +85,19 @@ def test_status_falls_back_to_pull_request_text(tmp_path: Path, monkeypatch) -> 
     assert status["linked"] is True
 
 
+def test_status_skips_pull_request_lookup_when_disabled(tmp_path: Path, monkeypatch) -> None:
+    subprocess.run(["git", "init", "-b", "status", str(tmp_path)], check=True, capture_output=True)
+
+    def lookup(*_args, **_kwargs):
+        raise AssertionError("disabled setting must not spawn gh")
+
+    monkeypatch.setattr("aoe_linear_plugin.handlers.pull_request_hints", lookup)
+    status = linear_status(str(tmp_path), env={}, use_pull_requests=False)
+
+    assert status["linked"] is False
+    assert status["error"] is None
+
+
 def test_status_uses_branch_issue_identifier_and_summarizes_state(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-b", "feature/ENG-7-do-work", str(tmp_path)], check=True, capture_output=True)
 

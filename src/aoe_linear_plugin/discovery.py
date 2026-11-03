@@ -12,7 +12,6 @@ GIT_TIMEOUT = 2.0
 COMMIT_HINT_LIMIT = 30
 GH_TIMEOUT = 5.0
 PR_HINT_TTL = 600.0
-MAX_PR_HINTS = 4
 
 # ``(path, branch) -> (expires_at, head, hints)``. Pull request text changes rarely, and a poll
 # must not re-run ``gh`` for every slug-named branch, so a lookup is reused until the checkout's
@@ -130,9 +129,7 @@ def _pull_request_text(path: str, branch: str) -> list[str]:
     for pull_request in pull_requests:
         if isinstance(pull_request, dict):
             hints.extend(_pull_request_texts(pull_request))
-        if len(hints) >= MAX_PR_HINTS:
-            break
-    return hints[:MAX_PR_HINTS]
+    return hints
 
 
 def pull_request_hints(path: str, branch: str) -> list[str]:

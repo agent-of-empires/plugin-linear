@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 from aoe_linear_plugin.client import LinearClient
@@ -73,8 +73,9 @@ def resolve_branch(
     """Resolve exact branch metadata plus issue identifiers in the name and hints.
 
     A worktree branch is often a slug of the task title with no identifier in it, so callers
-    may pass the session title and recent commit subjects; branch text still wins, and hint
-    lookups are bounded so speculative lookups stay cheap.
+    may pass the session title and recent commit subjects. Branch text still wins: hints are
+    consulted only when the branch names no issue, and hint lookups are bounded so speculative
+    lookups stay cheap.
     """
     candidates: dict[str, dict[str, Any]] = {}
     branch_issue = client.issue_for_branch(branch)
@@ -85,9 +86,16 @@ def resolve_branch(
         for issue in candidates.values()
         if isinstance(issue.get("identifier"), str)
     }
-    speculative = [*identifiers_in_branch(branch)[:MAX_BRANCH_IDENTIFIERS], *hint_identifiers(hints)]
+
+    def speculative() -> Iterator[str]:
+        yield from identifiers_in_branch(branch)[:MAX_BRANCH_IDENTIFIERS]
+        # A branch cut from main carries unrelated issues in its commit history, so hints are
+        # read only when the branch itself resolved nothing.
+        if not candidates:
+            yield from hint_identifiers(hints)
+
     attempted: set[str] = set()
-    for identifier in speculative:
+    for identifier in speculative():
         key = identifier.casefold()
         if key in known_identifiers or key in attempted:
             continue

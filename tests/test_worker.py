@@ -59,7 +59,13 @@ def test_worker_publishes_only_row_badge_and_pane_state() -> None:
 def test_community_plugin_open_uses_host_runtime_and_browser_action(monkeypatch) -> None:
     calls: dict[str, object] = {}
 
-    def open_issue(path: str, *, selected: str | None = None, open_browser: bool = False) -> dict[str, str]:
+    def open_issue(
+        path: str,
+        *,
+        selected: str | None = None,
+        open_browser: bool = False,
+        use_pull_requests: bool = True,
+    ) -> dict[str, str]:
         calls.update(path=path, selected=selected, open_browser=open_browser)
         return {"url": "https://linear.app/issue/ENG-1", "kind": "issue", "identifier": selected or ""}
 
@@ -122,7 +128,13 @@ def test_community_plugin_refresh_uses_deferred_scheduling() -> None:
 def test_unprefixed_open_alias_is_dispatchable(monkeypatch) -> None:
     calls: dict[str, object] = {}
 
-    def open_issue(path: str, *, selected: str | None = None, open_browser: bool = False) -> dict[str, str]:
+    def open_issue(
+        path: str,
+        *,
+        selected: str | None = None,
+        open_browser: bool = False,
+        use_pull_requests: bool = True,
+    ) -> dict[str, str]:
         calls.update(path=path, open_browser=open_browser)
         return {"url": "https://linear.app/issue/ENG-1", "kind": "issue", "identifier": selected or "ENG-1"}
 

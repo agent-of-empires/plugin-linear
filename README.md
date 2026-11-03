@@ -50,7 +50,7 @@ Linear is an issue tracker, not a source-control or CI provider. This plugin rep
 
 - **Refresh interval**: 0–86400 seconds (default 120); zero disables background polling.
 - **Show priority**: controls priority badges in the issue selector.
-- **Read Linear links from pull request text** (`use_pull_requests`, on by default): allows one cached `gh pr list` lookup per unresolved checkout, used only when the branch, its recent commits, and the session title name no Linear issue. Turn it off to keep the plugin entirely on the Linear API.
+- **Read Linear links from pull request text** (`use_pull_requests`, on by default): allows one cached `gh pr list` lookup per unresolved checkout, used only when the branch, its recent commits, and the session title name no Linear issue. Background refresh and the `status` and `open` commands honor it. Turn it off to keep the plugin entirely on the Linear API.
 - **Show Linear status for snoozed sessions** (`include_snoozed`, off by default): the session list keeps a snoozed session as a sunk row, and turning this on keeps its Linear row badge live. It costs Linear requests for parked work, since every poll re-queries those branches.
 - **Ignore Git submodules**: excludes initialized nested child submodules during checkout discovery; the session's primary checkout is retained.
 

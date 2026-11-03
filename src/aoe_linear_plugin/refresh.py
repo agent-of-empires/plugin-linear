@@ -54,26 +54,38 @@ def _fetch_branch(
 
 def _fetch_branches(
     client: LinearClient,
-    branches: list[str],
-    hints_by_branch: dict[str, list[str]],
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]], dict[str, Any] | None]:
-    issues_by_branch: dict[str, list[dict[str, Any]]] = {}
-    errors_by_branch: dict[str, dict[str, Any]] = {}
+    targets: list[tuple[str, str]],
+    hints: dict[tuple[str, str], list[str]],
+) -> tuple[
+    dict[tuple[str, str], list[dict[str, Any]]],
+    dict[tuple[str, str], dict[str, Any]],
+    dict[str, Any] | None,
+]:
+    issues_by_target: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    errors_by_target: dict[tuple[str, str], dict[str, Any]] = {}
     stop_error: dict[str, Any] | None = None
     rate_limit: dict[str, Any] | None = None
-    for branch in branches:
-        issues, error = (
-            _fetch_branch(client, branch, hints_by_branch.get(branch, [])) if stop_error is None else ([], stop_error)
-        )
-        issues_by_branch[branch] = issues
+    # Checkouts that share a branch and the same hints share one lookup. Differing hints must
+    # not leak between checkouts, so those are fetched separately.
+    fetched: dict[tuple[str, tuple[str, ...]], tuple[list[dict[str, Any]], dict[str, Any] | None]] = {}
+    for target in targets:
+        group = (target[1], tuple(hints.get(target, [])))
+        if group in fetched:
+            issues, error = fetched[group]
+        elif stop_error is None:
+            issues, error = _fetch_branch(client, target[1], list(group[1]))
+            fetched[group] = (issues, error)
+        else:
+            issues, error = [], stop_error
+        issues_by_target[target] = issues
         if error is None:
             continue
-        errors_by_branch[branch] = error
+        errors_by_target[target] = error
         if error["kind"] in {"auth", "rate_limited"}:
             stop_error = error
         if error["kind"] == "rate_limited" and rate_limit is None:
             rate_limit = error
-    return issues_by_branch, errors_by_branch, rate_limit
+    return issues_by_target, errors_by_target, rate_limit
 
 
 def _checkout_hints(
@@ -105,7 +117,7 @@ def _checkout_hints(
                 commits[path] = commit_messages(path)
             key = (path, checkout["branch"])
             hints[key] = [*titles.get(key, []), *commits[path]]
-            if pull_requests and not _hints_name_issue(hints[key]):
+            if pull_requests and not branch_is_linear(checkout["branch"]) and not _hints_name_issue(hints[key]):
                 hints[key].extend(pull_request_hints(path, checkout["branch"]))
     return hints
 
@@ -123,7 +135,7 @@ def build_snapshot(
     ignore_submodules: bool = True,
     use_pull_requests: bool = True,
 ) -> dict[str, Any]:
-    """Fetch unique branch keys once and keep last-good issue data on failure."""
+    """Fetch each checkout's branch once per distinct hint set and keep last-good issue data."""
     token = resolve_token(os.environ if env is None else env)
     with _lock:
         if time.monotonic() < _state["backoff_until"]:
@@ -134,22 +146,18 @@ def build_snapshot(
         hints = _checkout_hints(sessions, checkout_map, pull_requests=use_pull_requests)
         if token is None:
             return _auth_snapshot(sessions, checkout_map, hints)
-        unique = {(item["path"], item["branch"]) for checkouts in checkout_map.values() for item in checkouts}
-        branches = sorted({branch for _, branch in unique})
-        hints_by_branch: dict[str, list[str]] = {}
-        for path, branch in sorted(unique):
-            hints_by_branch.setdefault(branch, []).extend(hints.get((path, branch), []))
+        targets = sorted({(item["path"], item["branch"]) for checkouts in checkout_map.values() for item in checkouts})
         with LinearClient(token, transport=transport) as client:
-            branch_issues, branch_errors, rate_limit = _fetch_branches(client, branches, hints_by_branch)
+            branch_issues, branch_errors, rate_limit = _fetch_branches(client, targets, hints)
         if rate_limit:
             _state["backoff_until"] = time.monotonic() + (rate_limit.get("retry_after") or 60.0)
         current: dict[tuple[str, str], list[dict[str, Any]]] = {}
         errors: dict[tuple[str, str], dict[str, Any]] = {}
         stale_keys: set[tuple[str, str]] = set()
-        for path, branch in sorted(unique):
+        for path, branch in targets:
             key = (path, branch)
-            issues = branch_issues[branch]
-            error = branch_errors.get(branch)
+            issues = branch_issues[key]
+            error = branch_errors.get(key)
             if error:
                 previous = _previous_repo(_state["snapshot"], path, branch)
                 cached = (previous or {}).get("issues", [])

@@ -38,6 +38,7 @@ def linear_status(
     env: dict[str, str] | None = None,
     transport: httpx.BaseTransport | None = None,
     selected: str | None = None,
+    use_pull_requests: bool = True,
 ) -> dict[str, Any]:
     """Return fail-soft issue state for the current branch."""
     result: dict[str, Any] = {
@@ -59,7 +60,7 @@ def linear_status(
     # branches named after the task instead; the pull request lookup runs only as a last resort.
     hints = commit_messages(checkout["path"])
     branch_linked = branch_is_linear(branch)
-    if not branch_linked and not any(identifiers_in_text(hint) for hint in hints):
+    if use_pull_requests and not branch_linked and not any(identifiers_in_text(hint) for hint in hints):
         hints.extend(pull_request_hints(checkout["path"], branch))
     linked = branch_linked or any(identifiers_in_text(hint) for hint in hints)
     result["linked"] = linked
@@ -91,16 +92,25 @@ def linear_status(
     return result
 
 
-def linear_open(
+# The command surface already has one keyword per host concern; splitting them would move the
+# complexity into every caller.
+def linear_open(  # noqa: PLR0913
     path: str = ".",
     *,
     env: dict[str, str] | None = None,
     transport: httpx.BaseTransport | None = None,
     selected: str | None = None,
     open_browser: bool = False,
+    use_pull_requests: bool = True,
 ) -> dict[str, str]:
     """Resolve an issue URL and optionally open it in the browser."""
-    status = linear_status(path, env=env, transport=transport, selected=selected)
+    status = linear_status(
+        path,
+        env=env,
+        transport=transport,
+        selected=selected,
+        use_pull_requests=use_pull_requests,
+    )
     issue = selected_issue(status["issues"], selected)
     if issue is None:
         error = status["error"]

@@ -153,12 +153,25 @@ class Runtime:
             if not isinstance(path, str) or (selected is not None and not isinstance(selected, str)):
                 raise ValueError("path and selected must be strings")
             if method == "plugin.community.linear.status":
-                return linear_status(path, selected=selected)
-            return linear_open(path, selected=selected, open_browser=True)
+                return linear_status(path, selected=selected, use_pull_requests=self.use_pull_requests)
+            return linear_open(
+                path,
+                selected=selected,
+                open_browser=True,
+                use_pull_requests=self.use_pull_requests,
+            )
         if method == "linear.status":
-            return linear_status(_path(params), selected=params.get("issue"))
+            return linear_status(
+                _path(params),
+                selected=params.get("issue"),
+                use_pull_requests=self.use_pull_requests,
+            )
         if method in ("linear.open", "plugin.community.linear.open"):
-            return linear_open(_path(params), selected=params.get("issue"))
+            return linear_open(
+                _path(params),
+                selected=params.get("issue"),
+                use_pull_requests=self.use_pull_requests,
+            )
         if method in ("linear.refresh", "plugin.community.linear.refresh", SELECT_METHOD):
             return {"accepted": True}
         raise UnknownMethodError(method)

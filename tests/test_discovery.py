@@ -56,7 +56,7 @@ def test_pull_request_hints_include_title_body_and_comments(monkeypatch, tmp_pat
             "number": 31,
             "title": "Status replies",
             "body": "Fixes 0DIN-2361",
-            "comments": [{"body": "Linked 0DIN-2361"}, {"body": "thanks"}],
+            "comments": [{"body": "Linked 0DIN-2361"}, {"body": "thanks"}, {"body": "follow-up"}],
         }
     ]
 
@@ -68,7 +68,8 @@ def test_pull_request_hints_include_title_body_and_comments(monkeypatch, tmp_pat
 
     monkeypatch.setattr(discovery.subprocess, "run", respond)
     hints = pull_request_hints(str(repo), "status")
-    assert hints == ["Status replies", "Fixes 0DIN-2361", "Linked 0DIN-2361", "thanks"]
+    # Every text field is scanned, so a later comment cannot be crowded out by the cap.
+    assert hints == ["Status replies", "Fixes 0DIN-2361", "Linked 0DIN-2361", "thanks", "follow-up"]
     assert pull_request_hints(str(repo), "status") == hints
     assert len([call for call in calls if call[0] == "gh"]) == 1
 
@@ -101,6 +102,24 @@ def test_pull_request_hints_are_empty_when_gh_is_unavailable(monkeypatch, tmp_pa
         raise FileNotFoundError
 
     monkeypatch.setattr(discovery.subprocess, "run", missing)
+    assert pull_request_hints(str(tmp_path), "status") == []
+
+
+def test_pull_request_hints_are_empty_when_gh_fails(monkeypatch, tmp_path: Path) -> None:
+    discovery._pr_cache.clear()
+    monkeypatch.setattr(discovery, "_git", lambda _path, *_args: "head")
+
+    def failed(*_args, **_kwargs):
+        return subprocess.CompletedProcess([], 1, stdout="", stderr="authentication required")
+
+    monkeypatch.setattr(discovery.subprocess, "run", failed)
+    assert pull_request_hints(str(tmp_path), "status") == []
+
+    def timed_out(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(["gh"], 5)
+
+    discovery._pr_cache.clear()
+    monkeypatch.setattr(discovery.subprocess, "run", timed_out)
     assert pull_request_hints(str(tmp_path), "status") == []
 
 
