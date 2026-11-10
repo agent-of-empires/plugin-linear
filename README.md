@@ -7,7 +7,7 @@ The Linear plugin resolves issue state for session branches and displays it in t
 
 ## Install and authenticate
 
-AoE 1.20.0 or newer, below 2.0.0 (the manifest declares `>=1.20.0, <2.0.0`), with plugin SDK API 19 and Python 3.10+ are required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/`; `pip` access to package dependencies is required. Local source trees must not contain symlinks such as `.venv`.
+AoE 1.23.0 or newer, below 2.0.0, with plugin SDK API 21 and Python 3.10+ are required. Suggestions depend on [AoE PR #5179](https://github.com/agent-of-empires/agent-of-empires/pull/5179) until it ships. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/`; `pip` access to package dependencies is required. Local source trees must not contain symlinks such as `.venv`.
 
 Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache.
 
@@ -37,7 +37,7 @@ The session row exposes Linear workflow and priority as filter facets for the da
 
 ## Install from source
 
-AoE 1.20.0 or newer, below 2.0.0 (the manifest declares `>=1.20.0, <2.0.0`), with plugin SDK API 19 is required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/` during installation. Python 3.10+ and `pip` access to the package dependencies are required. For a local install, use a clean source tree (no `.venv` or other symlinks); the AoE installer rejects symlinks in local plugin sources.
+AoE 1.23.0 or newer, below 2.0.0, with plugin SDK API 21 is required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/` during installation. Python 3.10+ and `pip` access to the package dependencies are required. For a local install, use a clean source tree (no `.venv` or other symlinks); the AoE installer rejects symlinks in local plugin sources.
 
 The manifest uses the unverified community ID `community.linear`. There is no published GitHub release or tag yet. `gh:agent-of-empires/plugin-linear` therefore cannot resolve to a release; AoE can fall back to the unverified default branch only with explicit consent (`--yes` or an interactive confirmation). That branch must contain this manifest before it can install this plugin. Linear is not in AoE's featured index; a featured-index entry is only needed to claim a reserved verified namespace or featured listing.
 
@@ -45,8 +45,8 @@ The manifest uses the unverified community ID `community.linear`. There is no pu
 
 The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.community.linear.status`, `plugin.community.linear.open`, and `plugin.community.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
 
-- Suggestions independently discover your assigned issues in the configured Linear workflow states (default: exact state name `Up Next`), without depending on existing AoE sessions. Every successful complete refresh replaces the current snapshot; API failures report an error and do not replace the last-good snapshot.
-- Each suggestion links to its canonical Linear issue URL and includes a preview and an actionable prompt that identifies issue text as untrusted input. The worker only publishes issue data to the host; session creation, prompting, trust defaults, and permission checks remain host-owned.
+- Suggestions independently discover your assigned issues in the configured Linear workflow states (default: exact state name `Up Next`), without depending on existing AoE sessions. The host can disable the source and controls its refresh interval. Successful refreshes publish the highest-priority 500 issues; failures preserve the last-good snapshot.
+- Each suggestion links to its Linear issue and exposes its description as untrusted preview text, separate from its draft prompt. The host owns session creation, prompting, trust defaults, and permission checks.
 
 ### GitHub plugin feature mapping
 
@@ -59,7 +59,7 @@ Linear is an issue tracker, not a source-control or CI provider. This plugin rep
 - **Ignore Git submodules**: excludes initialized nested child submodules during checkout discovery; the session's primary checkout is retained.
 - **Suggestion workflow states**: comma-separated exact Linear state names; defaults to `Up Next`.
 - **Suggestion teams/projects**: optional comma-separated exact Linear team keys/IDs and project names/IDs; empty means no additional scope restriction.
-- **Suggestion AoE project mappings**: optional JSON object mapping Linear project IDs or names to an exact registered AoE project name or canonical local path. Unmapped issues have no project assignment; the provider never guesses a scratch project.
+- **Suggestion project mapping**: map the Linear project ID (or team ID for an issue without a project) to registered AoE projects in Settings › Suggestions. Existing plugin-specific `suggestion_project_mappings` settings are no longer read and must be recreated in the host.
 
 ## Development
 

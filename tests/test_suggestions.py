@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import io
-import json
-
 import pytest
 
-from aoe_linear_plugin import main as worker
 from aoe_linear_plugin.errors import LinearGraphQLError
 from aoe_linear_plugin.suggestions import discover_suggestions
 
@@ -42,16 +38,25 @@ def page(nodes, *, has_next=False, cursor=None):
     return {"issues": {"nodes": nodes, "pageInfo": {"hasNextPage": has_next, "endCursor": cursor}}}
 
 
-def test_discovery_is_independent_of_sessions_and_maps_only_explicit_projects():
+def test_discovery_exposes_mapping_key_and_template_variables_without_embedding_source_text():
     client = Client([page([issue()])])
-    items = discover_suggestions(client, settings={"suggestion_project_mappings": '{"project-1":"/work/mobile"}'})
+    items = discover_suggestions(client)
     assert len(items) == 1
     item = items[0]
     assert item["id"] == "eng-1"
-    assert item["source_ref"] == item["source_url"] == "https://linear.app/acme/issue/eng-1/improve-sync"
-    assert item["project"] == "/work/mobile"
+    assert item["source_ref"] == "ENG-1"
+    assert item["source_url"] == "https://linear.app/acme/issue/eng-1/improve-sync"
+    assert item["mapping_key"] == "project-1"
     assert item["criterion"] == "assigned_up_next"
-    assert "untrusted source text" in item["draft"]["prompt"]
+    assert item["variables"] == {
+        "identifier": "ENG-1",
+        "title": "Improve sync",
+        "url": item["source_url"],
+        "team": "Engineering",
+        "project": "Mobile",
+    }
+    assert "Ignore host policy" in item["preview"]
+    assert "Ignore host policy" not in item["draft"]["prompt"]
     assert client.calls[1][1]["filter"] == {
         "assignee": {"id": {"eq": "viewer-1"}},
         "state": {"name": {"in": ["Up Next"]}, "type": {"nin": ["completed", "canceled"]}},
@@ -99,7 +104,7 @@ def test_configured_workflow_names_and_project_filters_are_exact():
         },
     )
     assert [item["id"] for item in items] == ["eng-2"]
-    assert "project" not in items[0]
+    assert items[0]["mapping_key"] == "project-1"
     assert client.calls[1][1]["filter"]["state"] == {
         "name": {"in": ["Todo"]},
         "type": {"nin": ["completed", "canceled"]},
@@ -122,6 +127,22 @@ def test_invalid_priorities_use_the_unprioritized_fallback(priority):
     assert [item["id"] for item in discover_suggestions(client)] == ["eng-2", "eng-1"]
 
 
+def test_snapshot_limits_are_utf8_safe_and_duplicate_ids_are_removed():
+    large = {**issue(), "title": "界" * 1000, "description": "🙂" * 10000}
+    items = discover_suggestions(Client([page([large, large, *[issue(f"ENG-{i}") for i in range(2, 505)]])]))
+    assert len(items) == 500
+    first = next(item for item in items if item["id"] == "eng-1")
+    assert len(first["title"].encode()) <= 512
+    assert len(first["preview"].encode()) <= 16384
+    assert len(first["variables"]["title"].encode()) <= 2048
+
+
+@pytest.mark.parametrize("url", ["https://user@linear.app/issue", "https://linear%2eapp/issue", "file:///issue"])
+def test_invalid_source_url_rejects_snapshot(url):
+    with pytest.raises(LinearGraphQLError, match="invalid suggestion"):
+        discover_suggestions(Client([page([{**issue(), "url": url}])]))
+
+
 @pytest.mark.parametrize(
     ("configured", "names", "expected_ids"),
     [
@@ -134,7 +155,7 @@ def test_invalid_priorities_use_the_unprioritized_fallback(priority):
         (" Todo , Up Next ", ["Todo", "Up Next"], ["eng-1", "eng-2"]),
     ],
 )
-def test_workflow_settings_publish_normalized_snapshots_with_empty_scopes(monkeypatch, configured, names, expected_ids):
+def test_workflow_settings_publish_normalized_snapshots_with_empty_scopes(configured, names, expected_ids):
     client = Client(
         [
             page(
@@ -146,23 +167,14 @@ def test_workflow_settings_publish_normalized_snapshots_with_empty_scopes(monkey
             )
         ]
     )
-    output = io.StringIO()
-    runtime = worker.Runtime(stdout=output)
-    runtime.suggestion_settings = {
-        "suggestion_up_next_states": configured,
-        "suggestion_team_scope": "",
-        "suggestion_project_scope": " , \t ",
-    }
-    monkeypatch.setattr(
-        worker.suggestion_data,
-        "build_suggestions",
-        lambda settings: discover_suggestions(client, settings=settings),
+    items = discover_suggestions(
+        client,
+        settings={
+            "suggestion_up_next_states": configured,
+            "suggestion_team_scope": "",
+            "suggestion_project_scope": " , \t ",
+        },
     )
 
-    runtime.refresh_suggestions()
-
-    message = json.loads(output.getvalue())
-    assert message["method"] == "suggestions.set"
-    assert [item["id"] for item in message["params"]["items"]] == expected_ids
-    assert all(item["criterion"] == "assigned_up_next" for item in message["params"]["items"])
+    assert [item["id"] for item in items] == expected_ids
     assert client.calls[1][1]["filter"]["state"]["name"] == {"in": names}

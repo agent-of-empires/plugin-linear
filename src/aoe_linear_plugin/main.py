@@ -18,6 +18,7 @@ from aoe_linear_plugin.handlers import linear_open, linear_status
 from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, ROW_COLUMN_SLOT, SELECT_METHOD, session_payloads
 
 DEFAULT_REFRESH_SECS = 120
+DEFAULT_SUGGESTION_REFRESH_SECS = 15 * 60
 RPC_TIMEOUT = 10.0
 EOF = object()
 _ids = itertools.count(1_000_000)
@@ -65,6 +66,9 @@ class Runtime:
         self.show_priority = True
         self.suggestion_settings: dict[str, Any] = {}
         self.next_refresh = 0.0
+        self.suggestion_interval = DEFAULT_SUGGESTION_REFRESH_SECS
+        self.next_suggestion_refresh = 0.0
+        self.suggestion_refresh_due = False
         self.refresh_due = False
 
     def send(self, message: dict[str, Any]) -> None:
@@ -121,28 +125,40 @@ class Runtime:
         self._remove_vanished(active)
         self.pushed = {sid for sid in active if isinstance(sid, str)}
 
+    def _suggestion_enabled(self) -> bool:
+        sources = self.call_host("suggestions.sources", {})
+        values = sources.get("sources") if isinstance(sources, dict) else None
+        if not isinstance(values, list):
+            raise LinearError("Could not read Linear suggestion source settings from AoE.")
+        matching = [
+            source
+            for source in values
+            if isinstance(source, dict) and source.get("criterion") == suggestion_data.CRITERION
+        ]
+        if len(matching) != 1 or not isinstance(matching[0].get("enabled"), bool):
+            raise LinearError("AoE returned invalid Linear suggestion source settings.")
+        return bool(matching[0]["enabled"])
+
+    def _publish_suggestions(self, items: list[dict[str, Any]]) -> None:
+        result = self.call_host("suggestions.set", {"items": items})
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            raise LinearError("AoE rejected the Linear suggestions snapshot.")
+
     def refresh_suggestions(self) -> None:
         """Publish a complete successful snapshot, or report failure without clearing it."""
         try:
-            items = suggestion_data.build_suggestions(self.suggestion_settings)
+            items = suggestion_data.build_suggestions(self.suggestion_settings) if self._suggestion_enabled() else []
+            self._publish_suggestions(items)
         except (LinearError, ValueError, TypeError) as exc:
             self.send(
                 {
                     "jsonrpc": "2.0",
                     "id": next(_ids),
                     "method": "suggestions.error",
-                    "params": {"message": str(exc)},
+                    "params": {"message": str(exc).encode("utf-8")[:4096].decode("utf-8", errors="ignore")},
                 }
             )
             return
-        self.send(
-            {
-                "jsonrpc": "2.0",
-                "id": next(_ids),
-                "method": "suggestions.set",
-                "params": {"items": items},
-            }
-        )
 
     def _remove_vanished(self, active: set[Any]) -> None:
         for sid in self.pushed - active:
@@ -186,6 +202,13 @@ class Runtime:
                 self.selected[sid] = identifier
                 self._push()
 
+    def _request_suggestion_refresh(self, params: Any) -> None:
+        if isinstance(params, dict):
+            minutes = params.get("refresh_minutes")
+            if isinstance(minutes, int) and not isinstance(minutes, bool) and minutes in (5, 15, 30, 60, 120):
+                self.suggestion_interval = minutes * 60
+        self.suggestion_refresh_due = True
+
     def handle(self, message: dict[str, Any]) -> None:
         method = message.get("method")
         if not isinstance(method, str):
@@ -194,7 +217,7 @@ class Runtime:
         msg_id = message.get("id")
         try:
             if method == "suggestions.refresh":
-                self.refresh_due = True
+                self._request_suggestion_refresh(params)
                 return
             result = self._command_result(method, params)
             self._after_command(method, params)
@@ -231,7 +254,6 @@ class Runtime:
             "suggestion_up_next_states",
             "suggestion_team_scope",
             "suggestion_project_scope",
-            "suggestion_project_mappings",
         ):
             result = self.call_host("config.get", {"key": key})
             value = result.get("value") if isinstance(result, dict) else None
@@ -247,23 +269,28 @@ class Runtime:
     def _scheduled_refresh(self) -> None:
         self.refresh_due = False
         try:
-            try:
-                self.refresh_suggestions()
-            except Exception:  # noqa: BLE001 — suggestion failures must not block session refresh.
-                sys.stderr.write("Linear suggestion refresh failed unexpectedly.\n")
-                self.send(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": next(_ids),
-                        "method": "suggestions.error",
-                        "params": {"message": "Linear suggestion refresh failed unexpectedly."},
-                    }
-                )
             self.refresh()
         except Exception as exc:  # noqa: BLE001  one failed poll must not terminate the worker.
             sys.stderr.write(f"Linear refresh failed unexpectedly ({type(exc).__name__}).\n")
         finally:
             self.next_refresh = time.monotonic() + self.interval if self.interval else float("inf")
+
+    def _scheduled_suggestions(self) -> None:
+        self.suggestion_refresh_due = False
+        try:
+            self.refresh_suggestions()
+        except Exception:  # noqa: BLE001 — suggestion failures must not block session refresh.
+            sys.stderr.write("Linear suggestion refresh failed unexpectedly.\n")
+            self.send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": next(_ids),
+                    "method": "suggestions.error",
+                    "params": {"message": "Linear suggestion refresh failed unexpectedly."},
+                }
+            )
+        finally:
+            self.next_suggestion_refresh = time.monotonic() + self.suggestion_interval
 
     def run(self) -> None:
         threading.Thread(target=self._read, daemon=True).start()
@@ -273,7 +300,12 @@ class Runtime:
                 self._scheduled_refresh()
             if self.stopped:
                 break
-            timeout = max(0.0, self.next_refresh - time.monotonic()) if self.interval else None
+            if self.suggestion_refresh_due or time.monotonic() >= self.next_suggestion_refresh:
+                self._scheduled_suggestions()
+            if self.stopped:
+                break
+            deadline = min(self.next_refresh, self.next_suggestion_refresh)
+            timeout = max(0.0, deadline - time.monotonic())
             try:
                 item = self.inbox.get(timeout=timeout)
             except queue.Empty:
