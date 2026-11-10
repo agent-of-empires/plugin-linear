@@ -145,14 +145,14 @@ class Runtime:
             self.send({"jsonrpc": "2.0", "id": next(_ids), "method": "ui.state.set", "params": params})
 
     def _command_result(self, method: str, params: dict[str, Any]) -> Any:
-        if method in ("plugin.community.linear.status", "plugin.community.linear.open"):
+        if method in ("plugin.agent-of-empires.linear.status", "plugin.agent-of-empires.linear.open"):
             if not isinstance(params, dict) or set(params) - {"path", "selected"}:
                 raise ValueError("Unknown parameter")
             path = params.get("path", ".")
             selected = params.get("selected")
             if not isinstance(path, str) or (selected is not None and not isinstance(selected, str)):
                 raise ValueError("path and selected must be strings")
-            if method == "plugin.community.linear.status":
+            if method == "plugin.agent-of-empires.linear.status":
                 return linear_status(path, selected=selected, use_pull_requests=self.use_pull_requests)
             return linear_open(
                 path,
@@ -166,18 +166,18 @@ class Runtime:
                 selected=params.get("issue"),
                 use_pull_requests=self.use_pull_requests,
             )
-        if method in ("linear.open", "plugin.community.linear.open"):
+        if method in ("linear.open", "plugin.agent-of-empires.linear.open"):
             return linear_open(
                 _path(params),
                 selected=params.get("issue"),
                 use_pull_requests=self.use_pull_requests,
             )
-        if method in ("linear.refresh", "plugin.community.linear.refresh", SELECT_METHOD):
+        if method in ("linear.refresh", "plugin.agent-of-empires.linear.refresh", SELECT_METHOD):
             return {"accepted": True}
         raise UnknownMethodError(method)
 
     def _after_command(self, method: str, params: dict[str, Any]) -> None:
-        if method in ("linear.refresh", "plugin.community.linear.refresh"):
+        if method in ("linear.refresh", "plugin.agent-of-empires.linear.refresh"):
             self.refresh_due = True
         elif method == SELECT_METHOD:
             sid = params.get("session_id")

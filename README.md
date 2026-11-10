@@ -11,7 +11,7 @@ AoE 1.20.0 or newer and Python 3.10+ are required. Install a clean checkout or s
 
 Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache.
 
-The manifest uses the unverified community ID `community.linear`. There is no published release or tag yet, so `gh:agent-of-empires/plugin-linear` requires explicit consent (`--yes` or interactive confirmation) to fall back to the default branch. Linear is not in AoE's featured index; a featured entry is only needed for a reserved verified namespace or featured listing.
+The manifest uses the unverified community ID `agent-of-empires.linear`. There is no published release or tag yet, so `gh:agent-of-empires/plugin-linear` requires explicit consent (`--yes` or interactive confirmation) to fall back to the default branch. Linear is not in AoE's featured index; a featured entry is only needed for a reserved verified namespace or featured listing.
 
 The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn`, `fs.read`, and `browser_open` capabilities. Build creates an isolated venv under `.aoe-build/`; the host launches `.aoe-build/venv/bin/aoe-linear-worker`.
 
@@ -36,11 +36,11 @@ The plugin declares only a `row-badge` and a `pane`. It publishes no status colu
 
 AoE 1.20.0 or newer is required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/` during installation. Python 3.10+ and `pip` access to the package dependencies are required. For a local install, use a clean source tree (no `.venv` or other symlinks); the AoE installer rejects symlinks in local plugin sources.
 
-The manifest uses the unverified community ID `community.linear`. There is no published GitHub release or tag yet. `gh:agent-of-empires/plugin-linear` therefore cannot resolve to a release; AoE can fall back to the unverified default branch only with explicit consent (`--yes` or an interactive confirmation). That branch must contain this manifest before it can install this plugin. Linear is not in AoE's featured index; a featured-index entry is only needed to claim a reserved verified namespace or featured listing.
+The manifest uses the unverified community ID `agent-of-empires.linear`. There is no published GitHub release or tag yet. `gh:agent-of-empires/plugin-linear` therefore cannot resolve to a release; AoE can fall back to the unverified default branch only with explicit consent (`--yes` or an interactive confirmation). That branch must contain this manifest before it can install this plugin. Linear is not in AoE's featured index; a featured-index entry is only needed to claim a reserved verified namespace or featured listing.
 
 ## Commands
 
-The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.community.linear.status`, `plugin.community.linear.open`, and `plugin.community.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
+The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.agent-of-empires.linear.status`, `plugin.agent-of-empires.linear.open`, and `plugin.agent-of-empires.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
 
 ### GitHub plugin feature mapping
 

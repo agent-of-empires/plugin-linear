@@ -22,7 +22,7 @@ def test_community_plugin_status_uses_host_runtime(tmp_path: Path, monkeypatch) 
         {
             "jsonrpc": "2.0",
             "id": 7,
-            "method": "plugin.community.linear.status",
+            "method": "plugin.agent-of-empires.linear.status",
             "params": {"path": str(tmp_path)},
         }
     )
@@ -77,7 +77,7 @@ def test_community_plugin_open_uses_host_runtime_and_browser_action(monkeypatch)
         {
             "jsonrpc": "2.0",
             "id": 8,
-            "method": "plugin.community.linear.open",
+            "method": "plugin.agent-of-empires.linear.open",
             "params": {"path": "/checkout", "selected": "ENG-1"},
         }
     )
@@ -96,7 +96,7 @@ def test_community_plugin_status_rejects_unknown_parameters() -> None:
         {
             "jsonrpc": "2.0",
             "id": 9,
-            "method": "plugin.community.linear.status",
+            "method": "plugin.agent-of-empires.linear.status",
             "params": {"selectedd": "ENG-1"},
         }
     )
@@ -114,7 +114,7 @@ def test_community_plugin_refresh_uses_deferred_scheduling() -> None:
         {
             "jsonrpc": "2.0",
             "id": 10,
-            "method": "plugin.community.linear.refresh",
+            "method": "plugin.agent-of-empires.linear.refresh",
             "params": {},
         }
     )
