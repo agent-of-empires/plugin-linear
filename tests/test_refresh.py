@@ -7,7 +7,7 @@ from pathlib import Path
 import httpx
 
 from aoe_linear_plugin import refresh
-from aoe_linear_plugin.uistate import ROW_COLUMN_SLOT, session_payloads
+from aoe_linear_plugin.uistate import ROW_BADGE_SLOT, session_payloads
 
 
 def _checkout(path: Path, branch: str) -> None:
@@ -87,6 +87,161 @@ def test_workspace_repos_sharing_branch_are_queried_once(monkeypatch, tmp_path: 
     ]
 
 
+def test_commit_subject_links_a_branch_named_after_the_work(monkeypatch, tmp_path: Path) -> None:
+    _checkout(tmp_path, "litellm")
+
+    def no_pull_request_lookup(path: str, branch: str) -> list[str]:
+        raise AssertionError("pull request text is only a last resort")
+
+    monkeypatch.setattr(refresh, "pull_request_hints", no_pull_request_lookup)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "0DIN-2360: wait for install readiness",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        variables = json.loads(request.content)["variables"]
+        if "branchName" in variables:
+            return httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}})
+        issue = {"id": "i1", "identifier": "0DIN-2360", "title": "Wait", "state": {"type": "started"}}
+        if variables["id"] == "0DIN-2360":
+            return httpx.Response(200, json={"data": {"issue": issue}})
+        return httpx.Response(200, json={"data": None, "errors": [{"message": "Entity not found: Issue"}]})
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(tmp_path), "title": "Loki installer readiness"}],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(respond),
+    )
+
+    session = snapshot["sessions"][0]
+    assert [issue["identifier"] for issue in session["issues"]] == ["0DIN-2360"]
+    assert session["linked"] is True
+    badge = next(item["payload"] for item in session_payloads(snapshot) if item["slot"] == ROW_BADGE_SLOT[0])
+    assert badge["items"][0]["text"] == "◐"
+
+
+def test_pull_request_text_links_a_slug_branch(monkeypatch, tmp_path: Path) -> None:
+    _checkout(tmp_path, "status")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+    monkeypatch.setattr(
+        refresh,
+        "pull_request_hints",
+        lambda _path, _branch: ["Status replies fixes 0DIN-2361"],
+    )
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        variables = json.loads(request.content)["variables"]
+        if "branchName" in variables:
+            return httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}})
+        if variables["id"] == "0DIN-2361":
+            issue = {"id": "i2", "identifier": "0DIN-2361", "title": "Status replies", "state": {"type": "started"}}
+            return httpx.Response(200, json={"data": {"issue": issue}})
+        return httpx.Response(200, json={"data": None, "errors": [{"message": "Entity not found: Issue"}]})
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(tmp_path), "title": "Status replies"}],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(respond),
+    )
+
+    session = snapshot["sessions"][0]
+    assert [issue["identifier"] for issue in session["issues"]] == ["0DIN-2361"]
+    assert session["linked"] is True
+    badge = next(item["payload"] for item in session_payloads(snapshot) if item["slot"] == ROW_BADGE_SLOT[0])
+    assert badge["items"][0]["text"] == "◐"
+
+
+def test_pull_request_lookup_is_skipped_when_the_branch_names_an_issue(monkeypatch, tmp_path: Path) -> None:
+    _checkout(tmp_path, "ENG-7-do-work")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    def lookup(*_args, **_kwargs):
+        raise AssertionError("branch already names an issue")
+
+    monkeypatch.setattr(refresh, "pull_request_hints", lookup)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        variables = json.loads(request.content)["variables"]
+        if "branchName" in variables:
+            return httpx.Response(200, json={"data": {"issueVcsBranchSearch": {"id": "1", "identifier": "ENG-7"}}})
+        return httpx.Response(200, json={"data": None, "errors": [{"message": "Entity not found: Issue"}]})
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(tmp_path), "title": "Do the work"}],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(respond),
+    )
+
+    assert [issue["identifier"] for issue in snapshot["sessions"][0]["issues"]] == ["ENG-7"]
+
+
+def test_checkouts_sharing_a_branch_keep_their_own_hints(monkeypatch, tmp_path: Path) -> None:
+    paths = [tmp_path / name for name in ("a", "b")]
+    for path, message in zip(paths, ("ENG-1 cache work", "ENG-2 queue work"), strict=True):
+        _checkout(path, "litellm")
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                message,
+            ],
+            check=True,
+            capture_output=True,
+        )
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        variables = json.loads(request.content)["variables"]
+        if "branchName" in variables:
+            return httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}})
+        identifier = variables["id"]
+        if identifier in {"ENG-1", "ENG-2"}:
+            issue = {
+                "id": identifier.lower(),
+                "identifier": identifier,
+                "title": identifier,
+                "state": {"type": "started"},
+            }
+            return httpx.Response(200, json={"data": {"issue": issue}})
+        return httpx.Response(200, json={"data": None, "errors": [{"message": "Entity not found: Issue"}]})
+
+    sessions = [
+        {"id": "s1", "project_path": str(paths[0]), "title": "cache layer"},
+        {"id": "s2", "project_path": str(paths[1]), "title": "queue worker"},
+    ]
+    snapshot = refresh.build_snapshot(
+        sessions,
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(respond),
+    )
+
+    assert [issue["identifier"] for issue in snapshot["sessions"][0]["issues"]] == ["ENG-1"]
+    assert [issue["identifier"] for issue in snapshot["sessions"][1]["issues"]] == ["ENG-2"]
+
+
 def test_auth_failure_stops_later_branch_requests(monkeypatch, tmp_path: Path) -> None:
     paths = [tmp_path / name for name in ("a", "b")]
     for index, path in enumerate(paths, start=1):
@@ -150,8 +305,8 @@ def test_http_failure_marks_last_good_issue_data_stale(monkeypatch, tmp_path: Pa
     assert [issue["identifier"] for issue in snapshot["sessions"][0]["issues"]] == ["ENG-1"]
     assert snapshot["sessions"][0]["stale"] is True
     assert snapshot["sessions"][0]["repos"][0]["error"]["kind"] == "network"
-    column = next(item["payload"] for item in session_payloads(snapshot) if item["slot"] == ROW_COLUMN_SLOT[0])
-    assert column["filter_values"] == ["priority:1", "state:started"]
+    badge = next(item["payload"] for item in session_payloads(snapshot) if item["slot"] == ROW_BADGE_SLOT[0])
+    assert badge["items"][0]["text"] == "◐"
 
 
 def test_http_rate_limit_sets_retry_backoff(monkeypatch, tmp_path: Path) -> None:
@@ -217,7 +372,9 @@ def test_http_failure_without_cached_issue_data_does_not_mark_snapshot_stale(mon
 
     session = snapshot["sessions"][0]
     assert session.get("stale") is None
-    assert session["repos"][0]["error"]["kind"] == "network"
+    # The branch names no Linear issue, so the failure is not the user's problem to see.
+    assert session["linked"] is False
+    assert session["repos"][0]["error"] is None
 
 
 def test_rate_limit_without_cached_issue_data_does_not_mark_snapshot_stale(monkeypatch, tmp_path: Path) -> None:
@@ -235,11 +392,93 @@ def test_rate_limit_without_cached_issue_data_does_not_mark_snapshot_stale(monke
     snapshot = refresh.build_snapshot([{"id": "s1", "project_path": str(tmp_path)}], env={})
 
     assert snapshot["sessions"][0].get("stale") is None
-    assert snapshot["sessions"][0]["repos"][0]["error"] == {
-        "kind": "rate_limited",
-        "hint": "Linear rate limit active; refresh will retry later.",
-    }
+    assert snapshot["sessions"][0]["linked"] is False
+    assert snapshot["sessions"][0]["repos"][0]["error"] is None
     assert snapshot["rate_limited"] is True
+
+
+def test_missing_credentials_are_reported_only_for_linear_branches(monkeypatch, tmp_path: Path) -> None:
+    linear = tmp_path / "linear"
+    other = tmp_path / "other"
+    _checkout(linear, "ENG-12-change")
+    _checkout(other, "main")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(linear)}, {"id": "s2", "project_path": str(other)}],
+        env={},
+    )
+
+    sessions = {session["session_id"]: session for session in snapshot["sessions"]}
+    assert sessions["s1"]["linked"] is True
+    assert sessions["s1"]["repos"][0]["error"]["kind"] == "auth"
+    assert sessions["s2"]["linked"] is False
+    assert sessions["s2"]["repos"][0]["error"] is None
+
+
+def test_rate_limit_backoff_reports_linked_new_sessions(monkeypatch, tmp_path: Path) -> None:
+    linked = tmp_path / "linked"
+    other = tmp_path / "other"
+    _checkout(linked, "ENG-12-change")
+    _checkout(other, "main")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 9999999999.0})
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(linked)}, {"id": "s2", "project_path": str(other)}],
+        env={},
+    )
+
+    sessions = {session["session_id"]: session for session in snapshot["sessions"]}
+    assert sessions["s1"]["linked"] is True
+    assert sessions["s1"]["repos"][0]["error"]["kind"] == "rate_limited"
+    assert sessions["s2"]["linked"] is False
+    assert sessions["s2"]["repos"][0]["error"] is None
+    assert snapshot["rate_limited"] is True
+
+
+def test_unlinked_branch_that_fails_to_look_up_stays_quiet(monkeypatch, tmp_path: Path) -> None:
+    _checkout(tmp_path, "main")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(tmp_path)}],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(lambda _: httpx.Response(503)),
+    )
+
+    session = snapshot["sessions"][0]
+    assert session["linked"] is False
+    assert session["repos"][0]["error"] is None
+    assert session.get("stale") is None
+
+
+def test_unlinked_repo_does_not_mask_a_linked_repo_failure(monkeypatch, tmp_path: Path) -> None:
+    linear = tmp_path / "linear"
+    other = tmp_path / "other"
+    _checkout(linear, "ENG-12-change")
+    _checkout(other, "main")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    def respond(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    session = {
+        "id": "s1",
+        "project_path": str(linear),
+        "workspace_repos": [
+            {"source_path": str(linear), "branch": "ENG-12-change"},
+            {"source_path": str(other), "branch": "main"},
+        ],
+    }
+    snapshot = refresh.build_snapshot(
+        [session],
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(respond),
+    )
+
+    repos = {repo["branch"]: repo for repo in snapshot["sessions"][0]["repos"]}
+    assert repos["ENG-12-change"]["error"]["kind"] == "network"
+    assert repos["main"]["error"] is None
 
 
 def test_rate_limit_keeps_completed_results_and_stops_remaining_requests(monkeypatch, tmp_path: Path) -> None:

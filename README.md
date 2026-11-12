@@ -3,7 +3,7 @@
 A refresh failure for a checkout with cached issues keeps that data visible and marks the affected session stale.
 A failure for a checkout with no cached issues is shown as unavailable, not stale; cached issues from other checkouts alone do not mark the session stale.
 
-The Linear plugin resolves issue state for session branches and displays it in the session list and a Linear pane. It uses Linear's GraphQL API directly; it does not shell out to `linear` or `gh`.
+The Linear plugin resolves issue state for session branches and displays it in the session list and a Linear pane. It uses Linear's GraphQL API directly and does not shell out to `linear`. When a branch, its recent commits, and the session title name no issue, it can ask the GitHub CLI (`gh`) for the branch's pull request title, body, and comments and read a Linear link from that text; this lookup is optional, cached per commit, and controlled by the `use_pull_requests` setting.
 
 ## Install and authenticate
 
@@ -11,7 +11,7 @@ AoE 1.23.0 or newer, below 2.0.0, with plugin SDK API 21 and Python 3.10+ are re
 
 Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache.
 
-The manifest uses the unverified community ID `community.linear`. There is no published release or tag yet, so `gh:agent-of-empires/plugin-linear` requires explicit consent (`--yes` or interactive confirmation) to fall back to the default branch. Linear is not in AoE's featured index; a featured entry is only needed for a reserved verified namespace or featured listing.
+The manifest uses the unverified community ID `agent-of-empires.linear`. There is no published release or tag yet, so `gh:agent-of-empires/plugin-linear` requires explicit consent (`--yes` or interactive confirmation) to fall back to the default branch. Linear is not in AoE's featured index; a featured entry is only needed for a reserved verified namespace or featured listing.
 
 The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn`, `fs.read`, and `browser_open` capabilities. Build creates an isolated venv under `.aoe-build/`; the host launches `.aoe-build/venv/bin/aoe-linear-worker`.
 
@@ -20,33 +20,31 @@ The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn
 - `Linear: status` returns the branch and its linked issues, with actionable auth/network/GraphQL errors.
 - `Linear: refresh` schedules an update of all active session panes in the worker's outer loop; the plugin polls at the configurable interval (default 120 seconds, `0` disables polling). Each refresh reuses one HTTP client. A rate limit stops remaining requests, retains completed results, and uses last-good state until the advertised reset time.
 - `Linear: open issue` opens the issue currently shown on the session row.
-- Branch resolution combines Linear's issue `branchName` metadata with up to five distinct issue identifiers embedded in branch names (for example `feature/ENG-123-add-cache`). A failed speculative GraphQL lookup (such as `UTF-8` in a branch name) does not discard other matches. Authentication, transport, and rate-limit failures remain visible. Multiple matches are shown in the pane; the selected issue can be changed there.
+- Branch resolution combines Linear's issue `branchName` metadata with up to five distinct issue identifiers embedded in branch names (for example `feature/ENG-123-add-cache`), including team keys that start with a digit (`athal/0din-2360-...`). When a worktree branch is a slug of the task title instead (for example `litellm`), up to three identifiers from recent commit subjects and the AoE session title are tried as well. If those name no issue, the branch's pull request title, body, and comments are read with `gh pr list` and tried as the last resort; the lookup is skipped when `gh` is missing or unauthenticated and cached per commit for 10 minutes so polling does not repeat it. A failed speculative GraphQL lookup (such as `UTF-8` in a branch name) does not discard other matches. Authentication, transport, and rate-limit failures remain visible. Multiple matches are shown in the pane; the selected issue can be changed there.
 - Session refresh considers the session checkout and host-provided `workspace_repos`, deduplicates repeated issue records, and keeps prior UI state while sessions are unavailable.
-- The row badge links to the selected issue and shows its Linear workflow-state glyph; the status column shows only its workflow state; sorting ranks urgent/high/started issues ahead of completed issues.
+- The session row carries one Linear badge and nothing else: a single workflow-state glyph (`◌` backlog, `○` todo, `◐` in progress, `●` done, `×` canceled) tinted by that state and linked to the selected issue. It shows no issue identifier and no status column, so the row stays quiet; the pane carries identifiers, titles, and details.
 - Pane details include issue status, priority, team, assignee, project, cycle, description, up to 10 recent comments, and attached resources. The selected issue appears in the pane header; the selector lists only alternate issues. Attachments may include linked pull requests when Linear has attached them.
-- Keeps cached issue data visible and marks the session stale when the refresh of a checkout with cached issues fails.
-- Shows an unavailable state for a checkout whose refresh fails before any issue data is cached.
+- Keeps previously loaded issue data visible and marks it stale when refresh fails.
+- Shows an unavailable state when a refresh fails before any issue data is cached.
+- Treats a checkout as not using Linear when neither its branch, its recent commit subjects, nor the session title names a Linear issue, so a missing key or a failed request shows a neutral state instead of an error badge or callout.
+- Coexists with the GitHub plugin: sessions without Linear work get a cleared Linear badge, so the row is left to whatever else claims it.
+- Suggestions independently discover your assigned issues in the configured Linear workflow states (default: exact state name `Up Next`), without depending on existing AoE sessions. The host can disable the source and controls its refresh interval. Successful refreshes publish the highest-priority 500 issues; failures preserve the last-good snapshot.
+- Each suggestion links to its Linear issue and exposes its description as untrusted preview text, separate from its draft prompt. The host owns session creation, prompting, trust defaults, and permission checks.
 - Session panes stay under the host's 64 KiB payload limit by dropping older comments, then truncating long descriptions when needed.
 
-The session row exposes Linear workflow and priority as filter facets for the dashboard and Kanban Board. Facet values include every linked issue in that session, not only the selected issue; refreshes with cached issue data keep those values. The filter contract:
-
-| Facet id | Label | Column | Values |
-|---|---|---|---|
-| `linear_workflow` | Linear workflow | `linear_issue_status` | `state:triage`, `state:backlog`, `state:unstarted`, `state:started`, `state:completed`, `state:canceled` |
-| `linear_priority` | Linear priority | `linear_issue_status` | `priority:0` (No priority) through `priority:4` (Low) |
+The plugin declares only a `row-badge` and a `pane`. It publishes no status column, sort key, or filter facet, so Linear adds no column, sort option, or filter to the dashboard's toolbar; workflow and priority are readable in the pane.
 
 ## Install from source
 
 AoE 1.23.0 or newer, below 2.0.0, with plugin SDK API 21 is required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/` during installation. Python 3.10+ and `pip` access to the package dependencies are required. For a local install, use a clean source tree (no `.venv` or other symlinks); the AoE installer rejects symlinks in local plugin sources.
 
-The manifest uses the unverified community ID `community.linear`. There is no published GitHub release or tag yet. `gh:agent-of-empires/plugin-linear` therefore cannot resolve to a release; AoE can fall back to the unverified default branch only with explicit consent (`--yes` or an interactive confirmation). That branch must contain this manifest before it can install this plugin. Linear is not in AoE's featured index; a featured-index entry is only needed to claim a reserved verified namespace or featured listing.
+The manifest uses the unverified community ID `agent-of-empires.linear`. There is no published GitHub release or tag yet. `gh:agent-of-empires/plugin-linear` therefore cannot resolve to a release; AoE can fall back to the unverified default branch only with explicit consent (`--yes` or an interactive confirmation). That branch must contain this manifest before it can install this plugin. Linear is not in AoE's featured index; a featured-index entry is only needed to claim a reserved verified namespace or featured listing.
 
 ## Commands
 
-The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.community.linear.status`, `plugin.community.linear.open`, and `plugin.community.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
+The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.agent-of-empires.linear.status`, `plugin.agent-of-empires.linear.open`, and `plugin.agent-of-empires.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
 
-- Suggestions independently discover your assigned issues in the configured Linear workflow states (default: exact state name `Up Next`), without depending on existing AoE sessions. The host can disable the source and controls its refresh interval. Successful refreshes publish the highest-priority 500 issues; failures preserve the last-good snapshot.
-- Each suggestion links to its Linear issue and exposes its description as untrusted preview text, separate from its draft prompt. The host owns session creation, prompting, trust defaults, and permission checks.
+The worker also answers the suggestion methods, whose shapes are fixed by the AoE API 21 suggestions contract; suggestion settings are read with `config.get` and the source is toggled through the host's `suggestions.sources` RPC rather than local config.
 
 ### GitHub plugin feature mapping
 
@@ -56,10 +54,14 @@ Linear is an issue tracker, not a source-control or CI provider. This plugin rep
 
 - **Refresh interval**: 0–86400 seconds (default 120); zero disables background polling.
 - **Show priority**: controls priority badges in the issue selector.
+- **Read Linear links from pull request text** (`use_pull_requests`, on by default): allows one cached `gh pr list` lookup per unresolved checkout, used only when the branch, its recent commits, and the session title name no Linear issue. Background refresh and the `status` and `open` commands honor it. Turn it off to keep the plugin entirely on the Linear API.
+- **Show Linear status for snoozed sessions** (`include_snoozed`, off by default): the session list keeps a snoozed session as a sunk row, and turning this on keeps its Linear row badge live. It costs Linear requests for parked work, since every poll re-queries those branches.
 - **Ignore Git submodules**: excludes initialized nested child submodules during checkout discovery; the session's primary checkout is retained.
 - **Suggestion workflow states**: comma-separated exact Linear state names; defaults to `Up Next`.
 - **Suggestion teams/projects**: optional comma-separated exact Linear team keys/IDs and project names/IDs; empty means no additional scope restriction.
 - **Suggestion project mapping**: map the Linear project ID (or team ID for an issue without a project) to registered AoE projects in Settings › Suggestions. Existing plugin-specific `suggestion_project_mappings` settings are no longer read and must be recreated in the host.
+
+Settings writes reach the running worker as the host's `plugin.settings.changed` notification, so a change applies on the next poll without restarting the worker.
 
 ## Development
 

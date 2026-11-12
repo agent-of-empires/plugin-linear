@@ -7,16 +7,9 @@ import re
 from typing import Any
 
 ROW_BADGE_SLOT = ("row-badge", "linear_issue_badge")
-ROW_COLUMN_SLOT = ("row-column", "linear_issue_status")
-SORT_KEY_SLOT = ("sort-key", "linear_issue_attention")
 PANE_SLOT = ("pane", "linear_issue_pane")
 SELECT_METHOD = "linear.select_issue"
 
-SORT_KEY_PAYLOAD = {
-    "label": "Linear issue attention",
-    "column": ROW_COLUMN_SLOT[1],
-    "direction": "asc",
-}
 _PRIORITY = {1: "Urgent", 2: "High", 3: "Normal", 4: "Low"}
 
 
@@ -41,44 +34,23 @@ _WORKFLOW_LABELS = {
     "completed": "Completed",
     "canceled": "Canceled",
 }
-FILTER_FACET_SLOT = "filter-facet"
-FILTER_FACETS: tuple[tuple[str, dict[str, Any]], ...] = (
-    (
-        "linear_workflow",
-        {
-            "label": "Linear workflow",
-            "column": ROW_COLUMN_SLOT[1],
-            "options": [
-                {"value": f"state:{state}", "label": label, "tone": _STATE_VISUAL.get(state, ("circle", "neutral"))[1]}
-                for state, label in _WORKFLOW_LABELS.items()
-            ],
-        },
-    ),
-    (
-        "linear_priority",
-        {
-            "label": "Linear priority",
-            "column": ROW_COLUMN_SLOT[1],
-            "options": [
-                {"value": f"priority:{priority}", "label": label}
-                for priority, label in {0: "No priority", **_PRIORITY}.items()
-            ],
-        },
-    ),
-)
+
+# The session row shows one workflow-state mark and nothing else. The host draws a badge item's
+# `text` in the TUI and only paints `icon` names in the web dashboard, so a single character is
+# the one status mark both surfaces render.
+_STATE_GLYPH = {
+    "backlog": "◌",
+    "unstarted": "○",
+    "started": "◐",
+    "completed": "●",
+    "canceled": "✕",
+}
+_ERROR_GLYPH = "!"
 
 
-def _filter_values(issues: list[dict[str, Any]]) -> list[str]:
-    """Union issue facts across one session, independent of display selection."""
-    values: set[str] = set()
-    for issue in issues:
-        state = _state(issue).get("type")
-        if isinstance(state, str) and state in _WORKFLOW_LABELS:
-            values.add(f"state:{state}")
-        priority = issue.get("priority")
-        if isinstance(priority, int) and not isinstance(priority, bool) and 0 <= priority <= 4:
-            values.add(f"priority:{priority}")
-    return sorted(values)
+def _state_glyph(state: dict[str, Any]) -> str:
+    state_type = state.get("type")
+    return _STATE_GLYPH.get(state_type, "○") if isinstance(state_type, str) else "○"
 
 
 def _state_visual(issue: dict[str, Any]) -> tuple[str, str, str | None]:
@@ -91,6 +63,17 @@ def _state_visual(issue: dict[str, Any]) -> tuple[str, str, str | None]:
     if isinstance(color, str) and re.fullmatch(r"#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?", color):
         return icon, tone, color
     return icon, tone, None
+
+
+def _status_tooltip(state: dict[str, Any], issue: dict[str, Any]) -> str:
+    name = state.get("name")
+    if isinstance(name, str) and name:
+        status = name
+    else:
+        state_type = state.get("type")
+        status = _WORKFLOW_LABELS.get(state_type, "Open") if isinstance(state_type, str) else "Open"
+    title = issue.get("title")
+    return f"{status} · {title}" if isinstance(title, str) and title else status
 
 
 def _rank(issue: dict[str, Any]) -> int:
@@ -154,7 +137,14 @@ def _issue_rows(
     return rows
 
 
+def _linked(session: dict[str, Any]) -> bool:
+    """Whether Linear is part of this session's work, so nothing is claimed otherwise."""
+    return bool(session.get("linked")) or bool(session.get("issues"))
+
+
 def _error_for(session: dict[str, Any]) -> dict[str, Any] | None:
+    if not _linked(session):
+        return None
     return next((repo.get("error") for repo in session.get("repos", []) if repo.get("error")), None)
 
 
@@ -390,37 +380,28 @@ def _session_ui(
     issues = _sort_issues(session.get("issues", []))
     current = _selected(issues, selected.get(sid))
     badge_items: list[dict[str, Any]] = []
-    column: dict[str, Any] = {}
     if current:
         state = _state(current)
-        icon, state_tone, _ = _state_visual(current)
-        tone = "success" if state.get("type") == "completed" else "warn" if current.get("priority") == 1 else state_tone
+        # The badge shows one workflow glyph, tinted by that state only: tinting it by priority
+        # or cache staleness made the mark read as a different state than the one it paints.
+        _, tone, _ = _state_visual(current)
         badge_items.append(
             {
-                "text": current.get("identifier", "Linear"),
-                "icon": icon,
+                "text": _state_glyph(state),
                 "tone": tone,
                 "href": current.get("url"),
-                "tooltip": current.get("title", ""),
+                "tooltip": _status_tooltip(state, current),
             }
         )
-        column = {
-            "text": state.get("name", "Open"),
-            "tone": tone,
-            "tooltip": current.get("title", ""),
-            "sort_value": _rank(current),
-        }
-        column["filter_values"] = _filter_values(issues)
     else:
         error = _error_for(session)
         if error:
-            hint = error.get("hint", "Linear request failed")
-            badge_items.append({"text": "Linear error", "tone": "danger", "tooltip": hint})
-            column = {"text": "Linear unavailable", "tone": "danger", "tooltip": hint, "sort_value": 98}
+            badge_items.append(
+                {"text": _ERROR_GLYPH, "tone": "danger", "tooltip": error.get("hint", "Linear request failed")}
+            )
     if session.get("stale") and issues:
+        # The labelled chip carries the staleness; the status glyph keeps its workflow color.
         badge_items.append({"text": "stale", "tone": "warn", "tooltip": "Showing cached Linear issue data"})
-        if column:
-            column["tone"] = "warn"
     badge_payload: dict[str, Any] = {"items": badge_items}
     if current and isinstance(current.get("url"), str):
         badge_payload["href"] = current["url"]
@@ -430,12 +411,6 @@ def _session_ui(
             "id": ROW_BADGE_SLOT[1],
             "session_id": sid,
             "payload": badge_payload,
-        },
-        {
-            "slot": ROW_COLUMN_SLOT[0],
-            "id": ROW_COLUMN_SLOT[1],
-            "session_id": sid,
-            "payload": column,
         },
         {
             "slot": PANE_SLOT[0],
@@ -452,12 +427,13 @@ def session_payloads(
     *,
     show_priority: bool = True,
 ) -> list[dict[str, Any]]:
-    """Build per-session UI state plus global sort and filter definitions."""
+    """Build per-session UI state: one row badge and the Linear pane.
+
+    The row carries no issue identifier and no status column, so the session list contributes a
+    single workflow glyph per row and the pane owns every detail.
+    """
     selected = selected or {}
-    result = [{"slot": SORT_KEY_SLOT[0], "id": SORT_KEY_SLOT[1], "payload": dict(SORT_KEY_PAYLOAD)}]
-    result.extend(
-        {"slot": FILTER_FACET_SLOT, "id": facet_id, "payload": payload} for facet_id, payload in FILTER_FACETS
-    )
+    result: list[dict[str, Any]] = []
     for session in snapshot.get("sessions", []):
         result.extend(_session_ui(session, selected, show_priority=show_priority))
     return result

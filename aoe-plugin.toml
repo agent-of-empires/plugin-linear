@@ -1,9 +1,9 @@
-id = "community.linear"
+id = "agent-of-empires.linear"
 name = "Linear"
 version = "0.1.0"
 api_version = 21
 aoe_version = ">=1.23.0, <2.0.0"
-description = "Linear issue status for Agent of Empires sessions and multi-checkout workspaces."
+description = "Linear issue status and assigned-issue suggestions for Agent of Empires sessions, resolving issues from branches, commits, and pull requests."
 icon = "circle-dot"
 icon_asset = "assets/linear-icon.png"
 capabilities = ["runtime.worker", "net", "session.read", "process.spawn", "fs.read", "browser_open"]
@@ -45,6 +45,22 @@ type = "boolean"
 default = true
 
 [[settings]]
+key = "use_pull_requests"
+label = "Read Linear links from pull request text"
+description = "When a branch, its recent commits, and the session title name no Linear issue, ask the GitHub CLI for the branch's pull request title, body, and comments. Requires `gh`; results are cached per commit for 10 minutes."
+type = "boolean"
+default = true
+advanced = true
+
+[[settings]]
+key = "include_snoozed"
+label = "Show Linear status for snoozed sessions"
+description = "Keep the row badge on snoozed sessions. Off by default, since polling them spends Linear requests on parked work."
+type = "boolean"
+default = false
+advanced = true
+
+[[settings]]
 key = "ignore_submodules"
 label = "Ignore Git submodules"
 description = "Skip nested Git submodules when discovering checkouts."
@@ -84,22 +100,6 @@ variables = ["identifier", "title", "url", "team", "project"]
 [[ui]]
 slot = "row-badge"
 id = "linear_issue_badge"
-
-[[ui]]
-slot = "row-column"
-id = "linear_issue_status"
-
-[[ui]]
-slot = "filter-facet"
-id = "linear_workflow"
-
-[[ui]]
-slot = "filter-facet"
-id = "linear_priority"
-
-[[ui]]
-slot = "sort-key"
-id = "linear_issue_attention"
 
 [[ui]]
 slot = "pane"

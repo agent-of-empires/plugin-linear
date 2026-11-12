@@ -4,9 +4,10 @@ import subprocess
 from pathlib import Path
 
 import httpx
+import pytest
 
 from aoe_linear_plugin.auth import resolve_token
-from aoe_linear_plugin.handlers import linear_status
+from aoe_linear_plugin.handlers import linear_open, linear_status
 
 
 def test_token_resolution_prefers_named_linear_key_only() -> None:
@@ -23,6 +24,78 @@ def test_status_auth_error_is_actionable_without_requesting_network(tmp_path: Pa
     assert status["issues"] == []
     assert status["error"]["kind"] == "auth"
     assert "LINEAR_API_KEY" in status["error"]["hint"]
+
+
+def test_status_on_a_checkout_that_does_not_use_linear_reports_no_error(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-b", "main", str(tmp_path)], check=True, capture_output=True)
+    status = linear_status(str(tmp_path), env={})
+    assert status["linked"] is False
+    assert status["error"] is None
+    assert status["summary"] == "Linear: no issue linked to main"
+
+
+def test_unlinked_checkout_ignores_api_failures(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-b", "dependabot/pip/httpx-0.27.0", str(tmp_path)], check=True, capture_output=True)
+    status = linear_status(
+        str(tmp_path),
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(lambda _: httpx.Response(503)),
+    )
+    assert status["linked"] is False
+    assert status["error"] is None
+    assert status["summary"].startswith("Linear: no issue linked")
+
+
+def test_open_without_a_linked_issue_is_not_an_error(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-b", "main", str(tmp_path)], check=True, capture_output=True)
+    assert linear_open(str(tmp_path), env={}) == {"url": "", "kind": "none", "identifier": ""}
+
+
+def test_open_reports_a_linked_branch_whose_issue_is_missing(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-b", "ENG-404-missing", str(tmp_path)], check=True, capture_output=True)
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}}))
+    with pytest.raises(ValueError, match="No Linear issue is linked"):
+        linear_open(str(tmp_path), env={"LINEAR_API_KEY": "token"}, transport=transport)
+
+
+def test_status_falls_back_to_pull_request_text(tmp_path: Path, monkeypatch) -> None:
+    subprocess.run(["git", "init", "-b", "status", str(tmp_path)], check=True, capture_output=True)
+
+    def pull_request_hints(*_args, **_kwargs):
+        return ["Fixes 0DIN-2361"]
+
+    monkeypatch.setattr("aoe_linear_plugin.handlers.pull_request_hints", pull_request_hints)
+
+    def response(request: httpx.Request) -> httpx.Response:
+        body = request.content.decode()
+        issue = {"id": "i2", "identifier": "0DIN-2361", "title": "Status replies", "state": {"name": "In Progress"}}
+        if "issueVcsBranchSearch" in body:
+            return httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}})
+        if '"0DIN-2361"' in body:
+            return httpx.Response(200, json={"data": {"issue": issue}})
+        return httpx.Response(200, json={"data": None, "errors": [{"message": "Entity not found: Issue"}]})
+
+    status = linear_status(
+        str(tmp_path),
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(response),
+    )
+
+    assert status["summary"] == "0DIN-2361: Status replies (In Progress)"
+    assert status["linked"] is True
+
+
+def test_status_skips_pull_request_lookup_when_disabled(tmp_path: Path, monkeypatch) -> None:
+    subprocess.run(["git", "init", "-b", "status", str(tmp_path)], check=True, capture_output=True)
+
+    def lookup(*_args, **_kwargs):
+        raise AssertionError("disabled setting must not spawn gh")
+
+    monkeypatch.setattr("aoe_linear_plugin.handlers.pull_request_hints", lookup)
+    status = linear_status(str(tmp_path), env={}, use_pull_requests=False)
+
+    assert status["linked"] is False
+    assert status["error"] is None
 
 
 def test_status_uses_branch_issue_identifier_and_summarizes_state(tmp_path: Path) -> None:

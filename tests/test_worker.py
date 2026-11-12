@@ -22,7 +22,7 @@ def test_community_plugin_status_uses_host_runtime(tmp_path: Path, monkeypatch) 
         {
             "jsonrpc": "2.0",
             "id": 7,
-            "method": "plugin.community.linear.status",
+            "method": "plugin.agent-of-empires.linear.status",
             "params": {"path": str(tmp_path)},
         }
     )
@@ -30,13 +30,42 @@ def test_community_plugin_status_uses_host_runtime(tmp_path: Path, monkeypatch) 
     response = json.loads(output.getvalue())
     assert response["id"] == 7
     assert response["result"]["branch"] == "linear-worker-test"
-    assert response["result"]["error"]["kind"] == "auth"
+    assert response["result"]["linked"] is False
+    assert response["result"]["error"] is None
+
+
+def test_worker_publishes_only_row_badge_and_pane_state() -> None:
+    output = io.StringIO()
+    runtime = Runtime(stdin=io.StringIO(""), stdout=output)
+    unlinked = {"sessions": [{"session_id": "s1", "issues": [], "linked": False, "repos": []}]}
+    linked = {"sessions": [{"session_id": "s1", "issues": [{"identifier": "ENG-1", "title": "Task"}], "repos": []}]}
+
+    runtime.snapshot = unlinked
+    runtime._push()
+    runtime.snapshot = linked
+    runtime._push()
+    runtime.snapshot = unlinked
+    runtime._push()
+
+    calls = [
+        (message["method"], message["params"]["slot"])
+        for message in (json.loads(line) for line in output.getvalue().splitlines())
+    ]
+    # A row is either cleared or given one status glyph; no column and no sort key is involved.
+    assert {slot for _, slot in calls} == {"row-badge", "pane"}
+    assert {method for method, _ in calls} == {"ui.state.set"}
 
 
 def test_community_plugin_open_uses_host_runtime_and_browser_action(monkeypatch) -> None:
     calls: dict[str, object] = {}
 
-    def open_issue(path: str, *, selected: str | None = None, open_browser: bool = False) -> dict[str, str]:
+    def open_issue(
+        path: str,
+        *,
+        selected: str | None = None,
+        open_browser: bool = False,
+        use_pull_requests: bool = True,
+    ) -> dict[str, str]:
         calls.update(path=path, selected=selected, open_browser=open_browser)
         return {"url": "https://linear.app/issue/ENG-1", "kind": "issue", "identifier": selected or ""}
 
@@ -48,7 +77,7 @@ def test_community_plugin_open_uses_host_runtime_and_browser_action(monkeypatch)
         {
             "jsonrpc": "2.0",
             "id": 8,
-            "method": "plugin.community.linear.open",
+            "method": "plugin.agent-of-empires.linear.open",
             "params": {"path": "/checkout", "selected": "ENG-1"},
         }
     )
@@ -67,7 +96,7 @@ def test_community_plugin_status_rejects_unknown_parameters() -> None:
         {
             "jsonrpc": "2.0",
             "id": 9,
-            "method": "plugin.community.linear.status",
+            "method": "plugin.agent-of-empires.linear.status",
             "params": {"selectedd": "ENG-1"},
         }
     )
@@ -85,7 +114,7 @@ def test_community_plugin_refresh_uses_deferred_scheduling() -> None:
         {
             "jsonrpc": "2.0",
             "id": 10,
-            "method": "plugin.community.linear.refresh",
+            "method": "plugin.agent-of-empires.linear.refresh",
             "params": {},
         }
     )
@@ -99,7 +128,13 @@ def test_community_plugin_refresh_uses_deferred_scheduling() -> None:
 def test_unprefixed_open_alias_is_dispatchable(monkeypatch) -> None:
     calls: dict[str, object] = {}
 
-    def open_issue(path: str, *, selected: str | None = None, open_browser: bool = False) -> dict[str, str]:
+    def open_issue(
+        path: str,
+        *,
+        selected: str | None = None,
+        open_browser: bool = False,
+        use_pull_requests: bool = True,
+    ) -> dict[str, str]:
         calls.update(path=path, open_browser=open_browser)
         return {"url": "https://linear.app/issue/ENG-1", "kind": "issue", "identifier": selected or "ENG-1"}
 

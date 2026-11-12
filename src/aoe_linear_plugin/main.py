@@ -15,11 +15,12 @@ from aoe_linear_plugin import refresh as refresh_data
 from aoe_linear_plugin import suggestions as suggestion_data
 from aoe_linear_plugin.errors import LinearError
 from aoe_linear_plugin.handlers import linear_open, linear_status
-from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, ROW_COLUMN_SLOT, SELECT_METHOD, session_payloads
+from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, SELECT_METHOD, session_payloads
 
 DEFAULT_REFRESH_SECS = 120
 DEFAULT_SUGGESTION_REFRESH_SECS = 15 * 60
 RPC_TIMEOUT = 10.0
+SETTINGS_CHANGED = "plugin.settings.changed"
 EOF = object()
 _ids = itertools.count(1_000_000)
 
@@ -65,11 +66,14 @@ class Runtime:
         self.ignore_submodules = True
         self.show_priority = True
         self.suggestion_settings: dict[str, Any] = {}
+        self.use_pull_requests = True
+        self.include_snoozed = False
         self.next_refresh = 0.0
         self.suggestion_interval = DEFAULT_SUGGESTION_REFRESH_SECS
         self.next_suggestion_refresh = 0.0
         self.suggestion_refresh_due = False
         self.refresh_due = False
+        self.configure_due = False
 
     def send(self, message: dict[str, Any]) -> None:
         with self.lock:
@@ -104,22 +108,33 @@ class Runtime:
         return None
 
     def sessions(self) -> list[dict[str, Any]] | None:
-        result = self.call_host("sessions.list", {"exclude": ["archived", "snoozed", "trashed"]})
+        """List the sessions whose Linear row status this worker keeps up to date.
+
+        Archived and trashed sessions have no row at all, so they are always excluded. A
+        snoozed session is still a sunk row in the TUI and the host still serves its UI state,
+        but polling it spends Linear requests on parked work, so keeping its row badge and
+        status column is opt-in through the `include_snoozed` setting.
+        """
+        exclude = ["archived", "trashed"] if self.include_snoozed else ["archived", "snoozed", "trashed"]
+        result = self.call_host("sessions.list", {"exclude": exclude})
         values = result.get("sessions") if isinstance(result, dict) else None
         if not isinstance(values, list):
             return None
         valid = all(isinstance(item, dict) and isinstance(item.get("id"), str) for item in values)
         if not valid:
             return None
-        return [
-            item for item in values if not item.get("archived") and not item.get("snoozed") and not item.get("trashed")
-        ]
+        # Mirror the exclusion list in case the host ignores the request parameter.
+        return [item for item in values if not any(item.get(flag) for flag in exclude)]
 
     def refresh(self, sessions: list[dict[str, Any]] | None = None) -> None:
         sessions = self.sessions() if sessions is None else sessions
         if sessions is None or self.stopped:
             return
-        self.snapshot = refresh_data.build_snapshot(sessions, ignore_submodules=self.ignore_submodules)
+        self.snapshot = refresh_data.build_snapshot(
+            sessions,
+            ignore_submodules=self.ignore_submodules,
+            use_pull_requests=self.use_pull_requests,
+        )
         self._push()
         active = {item.get("session_id") for item in self.snapshot.get("sessions", [])}
         self._remove_vanished(active)
@@ -162,38 +177,48 @@ class Runtime:
 
     def _remove_vanished(self, active: set[Any]) -> None:
         for sid in self.pushed - active:
-            for slot, slot_id in (ROW_BADGE_SLOT, ROW_COLUMN_SLOT, PANE_SLOT):
+            for slot, slot_id in (ROW_BADGE_SLOT, PANE_SLOT):
                 params = {"slot": slot, "id": slot_id, "session_id": sid}
                 self.send({"jsonrpc": "2.0", "id": next(_ids), "method": "ui.state.remove", "params": params})
 
     def _push(self) -> None:
         for params in session_payloads(self.snapshot, self.selected, show_priority=self.show_priority):
-            method = "ui.state.set"
-            if params.get("slot") == ROW_COLUMN_SLOT[0] and not params.get("payload", {}).get("text"):
-                method = "ui.state.remove"
-            self.send({"jsonrpc": "2.0", "id": next(_ids), "method": method, "params": params})
+            self.send({"jsonrpc": "2.0", "id": next(_ids), "method": "ui.state.set", "params": params})
 
     def _command_result(self, method: str, params: dict[str, Any]) -> Any:
-        if method in ("plugin.community.linear.status", "plugin.community.linear.open"):
+        if method in ("plugin.agent-of-empires.linear.status", "plugin.agent-of-empires.linear.open"):
             if not isinstance(params, dict) or set(params) - {"path", "selected"}:
                 raise ValueError("Unknown parameter")
             path = params.get("path", ".")
             selected = params.get("selected")
             if not isinstance(path, str) or (selected is not None and not isinstance(selected, str)):
                 raise ValueError("path and selected must be strings")
-            if method == "plugin.community.linear.status":
-                return linear_status(path, selected=selected)
-            return linear_open(path, selected=selected, open_browser=True)
+            if method == "plugin.agent-of-empires.linear.status":
+                return linear_status(path, selected=selected, use_pull_requests=self.use_pull_requests)
+            return linear_open(
+                path,
+                selected=selected,
+                open_browser=True,
+                use_pull_requests=self.use_pull_requests,
+            )
         if method == "linear.status":
-            return linear_status(_path(params), selected=params.get("issue"))
-        if method in ("linear.open", "plugin.community.linear.open"):
-            return linear_open(_path(params), selected=params.get("issue"))
-        if method in ("linear.refresh", "plugin.community.linear.refresh", SELECT_METHOD):
+            return linear_status(
+                _path(params),
+                selected=params.get("issue"),
+                use_pull_requests=self.use_pull_requests,
+            )
+        if method in ("linear.open", "plugin.agent-of-empires.linear.open"):
+            return linear_open(
+                _path(params),
+                selected=params.get("issue"),
+                use_pull_requests=self.use_pull_requests,
+            )
+        if method in ("linear.refresh", "plugin.agent-of-empires.linear.refresh", SELECT_METHOD):
             return {"accepted": True}
         raise UnknownMethodError(method)
 
     def _after_command(self, method: str, params: dict[str, Any]) -> None:
-        if method in ("linear.refresh", "plugin.community.linear.refresh"):
+        if method in ("linear.refresh", "plugin.agent-of-empires.linear.refresh"):
             self.refresh_due = True
         elif method == SELECT_METHOD:
             sid = params.get("session_id")
@@ -213,6 +238,14 @@ class Runtime:
         method = message.get("method")
         if not isinstance(method, str):
             return
+        if method == SETTINGS_CHANGED:
+            # The host notifies after a settings write; the outer loop re-reads config.get and
+            # repaints, so a toggle such as include_snoozed applies without a worker restart.
+            self.configure_due = True
+            return
+        self._dispatch(method, message)
+
+    def _dispatch(self, method: str, message: dict[str, Any]) -> None:
         params = message.get("params") or {}
         msg_id = message.get("id")
         try:
@@ -250,6 +283,8 @@ class Runtime:
                     self.interval = DEFAULT_REFRESH_SECS
         self._configure_boolean("ignore_submodules")
         self._configure_boolean("show_priority")
+        self._configure_boolean("use_pull_requests")
+        self._configure_boolean("include_snoozed")
         for key in (
             "suggestion_up_next_states",
             "suggestion_team_scope",
@@ -265,6 +300,12 @@ class Runtime:
         value = result.get("value") if isinstance(result, dict) else None
         if isinstance(value, bool):
             setattr(self, key, value)
+
+    def _apply_settings_change(self) -> None:
+        """Reload settings after a host settings write so the next poll uses the new values."""
+        self.configure_due = False
+        self._configure()
+        self.refresh_due = True
 
     def _scheduled_refresh(self) -> None:
         self.refresh_due = False
@@ -296,6 +337,8 @@ class Runtime:
         threading.Thread(target=self._read, daemon=True).start()
         self._configure()
         while not self.stopped:
+            if self.configure_due:
+                self._apply_settings_change()
             if self.refresh_due or time.monotonic() >= self.next_refresh:
                 self._scheduled_refresh()
             if self.stopped:
