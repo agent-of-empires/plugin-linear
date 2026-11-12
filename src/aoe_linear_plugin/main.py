@@ -173,7 +173,6 @@ class Runtime:
                     "params": {"message": str(exc).encode("utf-8")[:4096].decode("utf-8", errors="ignore")},
                 }
             )
-            return
 
     def _remove_vanished(self, active: set[Any]) -> None:
         for sid in self.pushed - active:
@@ -320,7 +319,7 @@ class Runtime:
         self.suggestion_refresh_due = False
         try:
             self.refresh_suggestions()
-        except Exception:  # noqa: BLE001 — suggestion failures must not block session refresh.
+        except Exception:  # noqa: BLE001 - suggestion failures must not block session refresh.
             sys.stderr.write("Linear suggestion refresh failed unexpectedly.\n")
             self.send(
                 {
