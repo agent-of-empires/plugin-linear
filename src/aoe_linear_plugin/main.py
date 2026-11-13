@@ -305,6 +305,9 @@ class Runtime:
         self.configure_due = False
         self._configure()
         self.refresh_due = True
+        # Suggestion scope and workflow states are settings too; republish the queue now
+        # instead of leaving the old scope visible until the next suggestion deadline.
+        self.suggestion_refresh_due = True
 
     def _scheduled_refresh(self) -> None:
         self.refresh_due = False

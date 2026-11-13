@@ -233,6 +233,34 @@ def test_settings_change_notification_reloads_snoozed_setting(tmp_path: Path, mo
     assert set(pushed) == {"row-badge", "pane"}
 
 
+def test_settings_change_notification_marks_suggestions_due(monkeypatch) -> None:
+    """A suggestion scope or state change must republish the queue, not wait for the deadline."""
+    runtime = Runtime(stdout=io.StringIO())
+    config = {"ui_refresh_secs": 0, "suggestion_up_next_states": "Up Next"}
+
+    def call_host(method, params, timeout=worker.RPC_TIMEOUT):
+        return {"value": config.get(params["key"], "")}
+
+    monkeypatch.setattr(runtime, "call_host", call_host)
+    runtime._configure()
+    runtime.suggestion_refresh_due = False
+    runtime.next_suggestion_refresh = float("inf")
+    assert runtime.suggestion_settings["suggestion_up_next_states"] == "Up Next"
+
+    config["suggestion_up_next_states"] = "Todo"
+    runtime.handle(
+        {
+            "jsonrpc": "2.0",
+            "method": worker.SETTINGS_CHANGED,
+            "params": {"revision": 2, "changed_keys": ["suggestion_up_next_states"]},
+        }
+    )
+    runtime._apply_settings_change()
+
+    assert runtime.suggestion_settings["suggestion_up_next_states"] == "Todo"
+    assert runtime.suggestion_refresh_due is True
+
+
 def test_issue_selection_repaints_cached_pane_without_network() -> None:
     output = io.StringIO()
     runtime = Runtime(stdin=io.StringIO(""), stdout=output)
