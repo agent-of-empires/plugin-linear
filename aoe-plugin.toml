@@ -1,7 +1,7 @@
 id = "agent-of-empires.linear"
 name = "Linear"
-version = "0.1.0"
-api_version = 21
+version = "0.2.0"
+api_version = 22
 aoe_version = ">=1.23.0, <2.0.0"
 description = "Linear issue status and assigned-issue suggestions for Agent of Empires sessions, resolving issues from branches, commits, and pull requests."
 icon = "circle-dot"
