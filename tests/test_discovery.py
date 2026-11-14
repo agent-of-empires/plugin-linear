@@ -144,6 +144,20 @@ def test_commit_messages_on_a_feature_branch_start_at_the_fork_point(tmp_path: P
     assert commit_messages(str(path)) == ["reword the status reply"]
 
 
+def test_a_feature_branch_keeps_the_commits_it_published(tmp_path: Path) -> None:
+    remote = tmp_path / "remote"
+    subprocess.run(["git", "init", "--bare", "-b", "status-work", str(remote)], check=True, capture_output=True)
+    path = tmp_path / "repo"
+    _repo(path)
+    # No default ref exists locally: the only candidate left is the branch's own publishing
+    # remote, which is where these commits came from rather than inherited history.
+    _git(path, "branch", "-m", "status-work")
+    _git(path, "commit", "--allow-empty", "-m", "0DIN-2360: published work")
+    _git(path, "remote", "add", "origin", str(remote))
+    _git(path, "push", "-u", "origin", "status-work")
+    assert commit_messages(str(path)) == ["0DIN-2360: published work", "initial"]
+
+
 def test_commit_messages_are_recent_subjects_newest_first(tmp_path: Path) -> None:
     path = tmp_path / "repo"
     _repo(path)

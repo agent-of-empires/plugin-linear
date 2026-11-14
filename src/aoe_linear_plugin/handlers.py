@@ -24,8 +24,16 @@ _LINK_MEMORY_LIMIT = 64
 
 
 def _remember_link(key: tuple[str, str], *, linked: bool) -> None:
+    """Record the latest evidence, dropping only the oldest entry to stay bounded.
+
+    A poll for an already remembered checkout must not cost the other checkouts their linkage,
+    since one of them may depend on it to report the next outage instead of looking unlinked.
+    """
+    if key in _known_links:
+        _known_links[key] = linked
+        return
     if len(_known_links) >= _LINK_MEMORY_LIMIT:
-        _known_links.clear()
+        del _known_links[next(iter(_known_links))]
     _known_links[key] = linked
 
 
