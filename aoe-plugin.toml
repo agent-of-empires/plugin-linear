@@ -1,9 +1,9 @@
 id = "agent-of-empires.linear"
 name = "Linear"
-version = "0.1.0"
-api_version = 7
-aoe_version = ">=1.20.0, <2.0.0"
-description = "Resolve Linear issues linked to git branches, commits, and pull requests, and open their URLs."
+version = "0.2.0"
+api_version = 22
+aoe_version = ">=1.23.0, <2.0.0"
+description = "Linear issue status and assigned-issue suggestions for Agent of Empires sessions, resolving issues from branches, commits, and pull requests."
 icon = "circle-dot"
 icon_asset = "assets/linear-icon.png"
 capabilities = ["runtime.worker", "net", "session.read", "process.spawn", "fs.read", "browser_open"]
@@ -67,6 +67,35 @@ description = "Skip nested Git submodules when discovering checkouts."
 type = "boolean"
 default = true
 advanced = true
+
+[[settings]]
+key = "suggestion_up_next_states"
+label = "Linear suggestion workflow states"
+description = "Comma-separated exact Linear workflow state names that qualify; defaults to Up Next."
+type = "string"
+default = "Up Next"
+
+[[settings]]
+key = "suggestion_team_scope"
+label = "Linear suggestion teams"
+description = "Optional comma-separated Linear team keys or IDs; empty includes all teams."
+type = "string"
+default = ""
+
+[[settings]]
+key = "suggestion_project_scope"
+label = "Linear suggestion projects"
+description = "Optional comma-separated exact Linear project names or IDs; empty includes all projects."
+type = "string"
+default = ""
+
+[suggestions]
+
+[[suggestions.sources]]
+criterion = "assigned_up_next"
+label = "Assigned issues up next"
+description = "Your assigned Linear issues in the configured workflow states."
+variables = ["identifier", "title", "url", "team", "project"]
 
 [[ui]]
 slot = "row-badge"

@@ -123,6 +123,27 @@ def test_pull_request_hints_are_empty_when_gh_fails(monkeypatch, tmp_path: Path)
     assert pull_request_hints(str(tmp_path), "status") == []
 
 
+def test_commit_messages_skip_history_inherited_from_the_base_branch(tmp_path: Path) -> None:
+    path = tmp_path / "repo"
+    _repo(path)
+    _git(path, "commit", "--allow-empty", "-m", "ENG-12: old base work")
+    # The base branch as published: everything reachable from here is inherited, not this
+    # checkout's work.
+    _git(path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(path, "commit", "--allow-empty", "-m", "0DIN-2360: this session")
+    assert commit_messages(str(path)) == ["0DIN-2360: this session"]
+
+
+def test_commit_messages_on_a_feature_branch_start_at_the_fork_point(tmp_path: Path) -> None:
+    path = tmp_path / "repo"
+    _repo(path)
+    _git(path, "commit", "--allow-empty", "-m", "ENG-12: old base work")
+    _git(path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(path, "checkout", "-b", "status-work")
+    _git(path, "commit", "--allow-empty", "-m", "reword the status reply")
+    assert commit_messages(str(path)) == ["reword the status reply"]
+
+
 def test_commit_messages_are_recent_subjects_newest_first(tmp_path: Path) -> None:
     path = tmp_path / "repo"
     _repo(path)

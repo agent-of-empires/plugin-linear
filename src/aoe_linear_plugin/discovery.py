@@ -150,9 +150,34 @@ def pull_request_hints(path: str, branch: str) -> list[str]:
     return list(hints)
 
 
+def _base_ref(path: str) -> str | None:
+    """The ref whose history this checkout inherited rather than authored, if any.
+
+    ``main`` usually has a remote, and its own commits are all inherited from that remote, so
+    the base branch itself has to exclude its upstream instead of itself.
+    """
+    branch = _git(path, "symbolic-ref", "--quiet", "--short", "HEAD")
+    for ref in ("origin/HEAD", "origin/main", "origin/master", "main", "master", "@{upstream}"):
+        if ref == branch:
+            continue
+        if _git(path, "rev-parse", "--verify", "--quiet", ref):
+            return ref
+    return None
+
+
 def commit_messages(path: str, limit: int = COMMIT_HINT_LIMIT) -> list[str]:
-    """Recent commit subjects, newest first, as extra hints for issue identifiers."""
-    output = _git(path, "log", f"-n{limit}", "--no-color", "--format=%s")
+    """Recent commit subjects authored on this branch, newest first, as hints for identifiers.
+
+    ``git log`` alone walks back into the base branch, so a checkout sitting on ``main`` would
+    attribute a months-old ``ENG-12`` commit to the current session and show that issue as this
+    checkout's work. Commits reachable from the base ref are excluded; a checkout with no known
+    base keeps its whole history.
+    """
+    args = [f"-n{limit}", "--no-color", "--format=%s", "HEAD"]
+    base = _base_ref(path)
+    if base:
+        args.extend(["--not", base])
+    output = _git(path, "log", *args)
     return [line.strip() for line in (output or "").splitlines() if line.strip()]
 
 

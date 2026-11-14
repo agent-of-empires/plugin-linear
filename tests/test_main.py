@@ -9,9 +9,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 
 from aoe_linear_plugin import main as worker
+from aoe_linear_plugin.client import LinearClient
 from aoe_linear_plugin.main import Runtime
 from aoe_linear_plugin.uistate import PANE_SLOT
 
@@ -68,6 +70,10 @@ def test_worker_host_smoke_answers_startup_rpcs_and_status(tmp_path: Path) -> No
                     result = {"value": value}
                 elif method == "sessions.list":
                     result = {"sessions": [{"id": "s1", "project_path": str(tmp_path)}]}
+                elif method == "suggestions.sources":
+                    result = {"sources": [{"criterion": "assigned_up_next", "enabled": True}]}
+                elif method == "suggestions.set":
+                    result = {"ok": True, "accepted": 0, "dropped": 0}
                 else:
                     if {41, 42, 43} <= {item.get("id") for item in output} and any(
                         item.get("method") == "ui.state.set" and item["params"]["slot"] == "pane" for item in output
@@ -227,6 +233,34 @@ def test_settings_change_notification_reloads_snoozed_setting(tmp_path: Path, mo
     assert set(pushed) == {"row-badge", "pane"}
 
 
+def test_settings_change_notification_marks_suggestions_due(monkeypatch) -> None:
+    """A suggestion scope or state change must republish the queue, not wait for the deadline."""
+    runtime = Runtime(stdout=io.StringIO())
+    config = {"ui_refresh_secs": 0, "suggestion_up_next_states": "Up Next"}
+
+    def call_host(method, params, timeout=worker.RPC_TIMEOUT):
+        return {"value": config.get(params["key"], "")}
+
+    monkeypatch.setattr(runtime, "call_host", call_host)
+    runtime._configure()
+    runtime.suggestion_refresh_due = False
+    runtime.next_suggestion_refresh = float("inf")
+    assert runtime.suggestion_settings["suggestion_up_next_states"] == "Up Next"
+
+    config["suggestion_up_next_states"] = "Todo"
+    runtime.handle(
+        {
+            "jsonrpc": "2.0",
+            "method": worker.SETTINGS_CHANGED,
+            "params": {"revision": 2, "changed_keys": ["suggestion_up_next_states"]},
+        }
+    )
+    runtime._apply_settings_change()
+
+    assert runtime.suggestion_settings["suggestion_up_next_states"] == "Todo"
+    assert runtime.suggestion_refresh_due is True
+
+
 def test_issue_selection_repaints_cached_pane_without_network() -> None:
     output = io.StringIO()
     runtime = Runtime(stdin=io.StringIO(""), stdout=output)
@@ -254,6 +288,65 @@ def test_issue_selection_repaints_cached_pane_without_network() -> None:
     assert pane["blocks"][0]["title"] == "ENG-2 · Started"
     selector = next(block for block in pane["blocks"] if block.get("title") == "Other linked issues")
     assert [row["prefix"] for row in selector["children"]] == ["ENG-1"]
+
+
+def test_disabled_suggestion_source_does_not_query_linear(monkeypatch) -> None:
+    output = io.StringIO()
+    runtime = Runtime(stdout=output)
+    monkeypatch.setattr(worker, "_ids", itertools.count(100))
+    runtime.inbox.put({"id": 100, "result": {"sources": [{"criterion": "assigned_up_next", "enabled": False}]}})
+    runtime.inbox.put({"id": 101, "result": {"ok": True, "accepted": 0, "dropped": 0}})
+    monkeypatch.setattr(worker.suggestion_data, "build_suggestions", lambda _: pytest.fail("queried disabled source"))
+    runtime.refresh_suggestions()
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert messages[-1]["params"] == {"items": []}
+
+
+def test_host_rejection_reports_error_without_publishing_an_empty_replacement(monkeypatch) -> None:
+    output = io.StringIO()
+    runtime = Runtime(stdout=output)
+    monkeypatch.setattr(worker, "_ids", itertools.count(100))
+    runtime.inbox.put({"id": 100, "result": {"sources": [{"criterion": "assigned_up_next", "enabled": True}]}})
+    runtime.inbox.put({"id": 101, "error": {"code": -32602, "message": "invalid"}})
+    monkeypatch.setattr(worker.suggestion_data, "build_suggestions", lambda _: [{"id": "one"}])
+    runtime.refresh_suggestions()
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert [message["method"] for message in messages] == [
+        "suggestions.sources",
+        "suggestions.set",
+        "suggestions.error",
+    ]
+    assert messages[-1]["params"]["message"] == "AoE rejected the Linear suggestions snapshot."
+
+
+def test_suggestion_refresh_uses_host_interval_independently(monkeypatch) -> None:
+    runtime = Runtime(stdout=io.StringIO())
+    runtime.handle({"method": "suggestions.refresh", "params": {"refresh_minutes": 30}})
+    assert runtime.suggestion_refresh_due
+    monkeypatch.setattr(runtime, "refresh_suggestions", lambda: None)
+    monkeypatch.setattr(worker.time, "monotonic", lambda: 100)
+    runtime._scheduled_suggestions()
+    assert runtime.next_suggestion_refresh == 1900
+    assert not runtime.suggestion_refresh_due
+
+
+def test_suggestions_failure_notifies_without_empty_snapshot(monkeypatch) -> None:
+    output = io.StringIO()
+    runtime = Runtime(stdout=output)
+    runtime.snapshot = {"sentinel": "keep"}
+
+    def fail(_settings):
+        raise worker.LinearError("Linear unavailable")
+
+    monkeypatch.setattr(
+        runtime, "call_host", lambda *_: {"sources": [{"criterion": "assigned_up_next", "enabled": True}]}
+    )
+    monkeypatch.setattr(worker.suggestion_data, "build_suggestions", fail)
+    runtime.refresh_suggestions()
+    message = json.loads(output.getvalue())
+    assert message["method"] == "suggestions.error"
+    assert message["params"] == {"message": "Linear unavailable"}
+    assert runtime.snapshot == {"sentinel": "keep"}
 
 
 def test_unknown_worker_method_returns_json_rpc_error() -> None:
@@ -321,3 +414,78 @@ def test_failed_poll_preserves_command_loop(monkeypatch, capsys) -> None:
     assert "sensitive response data" not in capsys.readouterr().err
     runtime.handle({"id": 2, "method": "linear.refresh"})
     assert runtime.refresh_due is True
+
+
+def test_unexpected_suggestion_failure_preserves_queue_and_refreshes_session_surfaces(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("LINEAR_API_KEY", "test-token")
+
+    def respond(request):
+        if "SuggestionViewer" in json.loads(request.content)["query"]:
+            return httpx.Response(200, json={"data": {"viewer": {"id": "viewer-1"}}})
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "issues": {
+                        "nodes": [{"state": "sensitive response data", "assignee": {"id": "viewer-1"}}],
+                        "pageInfo": {"hasNextPage": False},
+                    }
+                }
+            },
+        )
+
+    monkeypatch.setattr(
+        worker.suggestion_data,
+        "LinearClient",
+        lambda token: LinearClient(token, transport=httpx.MockTransport(respond)),
+    )
+    fresh_snapshot = {
+        "sessions": [
+            {
+                "session_id": "s1",
+                "issues": [
+                    {
+                        "identifier": "ENG-1",
+                        "title": "Updated issue",
+                        "state": {"name": "Started", "type": "started"},
+                    }
+                ],
+            }
+        ]
+    }
+    output = io.StringIO()
+    runtime = Runtime(stdout=output)
+    monkeypatch.setattr(
+        runtime,
+        "call_host",
+        lambda method, *_: (
+            {"sources": [{"criterion": "assigned_up_next", "enabled": True}]}
+            if method == "suggestions.sources"
+            else {"sessions": [{"id": "s1"}]}
+        ),
+    )
+    monkeypatch.setattr(worker.refresh_data, "build_snapshot", lambda *_args, **_kwargs: fresh_snapshot)
+    last_good_queue = [{"id": "keep"}]
+    host_queue = last_good_queue
+
+    runtime._scheduled_suggestions()
+    runtime._scheduled_refresh()
+
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    for message in messages:
+        if message.get("method") == "suggestions.set":
+            host_queue = message["params"]["items"]
+    assert host_queue == last_good_queue
+    error = next(message for message in messages if message.get("method") == "suggestions.error")
+    assert error["params"] == {"message": "Linear suggestion refresh failed unexpectedly."}
+    panes = {
+        message["params"]["slot"]: message["params"]["payload"]
+        for message in messages
+        if message.get("method") == "ui.state.set" and message["params"].get("session_id") == "s1"
+    }
+    assert panes["pane"]["blocks"][0]["title"] == "ENG-1 · Started"
+    assert [item["text"] for item in panes["row-badge"]["items"]] == ["◐"]
+    assert "row-column" not in panes
+    assert runtime.snapshot == fresh_snapshot
+    assert runtime.next_refresh > worker.time.monotonic()
+    assert "sensitive response data" not in output.getvalue() + capsys.readouterr().err

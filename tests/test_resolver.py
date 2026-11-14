@@ -33,6 +33,29 @@ def test_dependency_branches_are_not_treated_as_linear_work() -> None:
     assert branch_is_linear("main") is False
 
 
+def test_pull_request_number_slugs_are_not_treated_as_linear_work() -> None:
+    assert identifiers_in_branch("athal/pr-85-work") == ["PR-85"]
+    assert branch_is_linear("athal/pr-85-work") is False
+    assert branch_is_linear("athal/pullrequest-12-work") is False
+    # A real team key still counts.
+    assert branch_is_linear("athal/0din-2360-enforce-unreleased-registration") is True
+
+
+def test_dependency_branches_generate_no_speculative_lookups() -> None:
+    requested = []
+
+    def respond(request):
+        variables = json.loads(request.content)["variables"]
+        if "branchName" in variables:
+            return httpx.Response(200, json={"data": {"issueVcsBranchSearch": None}})
+        requested.append(variables["id"])
+        return httpx.Response(200, json={"data": {"issue": {"id": "9", "identifier": "REACT-18"}}})
+
+    with LinearClient("key", transport=httpx.MockTransport(respond)) as client:
+        assert resolve_branch(client, "dependabot/npm_and_yarn/react-18") == []
+    assert requested == []
+
+
 def test_dotted_issue_branches_still_name_their_issue() -> None:
     assert identifiers_in_branch("feature/ENG-12.fix") == ["ENG-12"]
     assert identifiers_in_branch("dependabot/pip/httpx-0.27.0") == []
@@ -132,7 +155,8 @@ def test_hints_find_the_issue_when_the_branch_carries_no_identifier() -> None:
             hints=["Odin 0DIN-2360 unreleased-only registration", "chore: tidy"],
         )
 
-    assert requested == ["PR-85", "0DIN-2360"]
+    # The PR number in the slug is not a team issue, so only the hint is looked up.
+    assert requested == ["0DIN-2360"]
     assert [issue["identifier"] for issue in issues] == ["0DIN-2360"]
 
 
