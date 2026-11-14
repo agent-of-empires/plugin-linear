@@ -15,6 +15,19 @@ from aoe_linear_plugin.discovery import checkout_for_path, commit_messages, pull
 from aoe_linear_plugin.errors import LinearError
 from aoe_linear_plugin.resolver import branch_is_linear, identifiers_in_text, resolve_branch, selected_issue
 
+# ``(path, branch) -> linked``. A branch can be linked only through Linear's VCS metadata, which
+# no local hint names (an issue whose branch is ``status``). The command path polls, so a lookup
+# failure after an earlier success must report the outage instead of the checkout looking
+# unlinked. The worker refreshes from one thread, so a plain dict is enough.
+_known_links: dict[tuple[str, str], bool] = {}
+_LINK_MEMORY_LIMIT = 64
+
+
+def _remember_link(key: tuple[str, str], *, linked: bool) -> None:
+    if len(_known_links) >= _LINK_MEMORY_LIMIT:
+        _known_links.clear()
+    _known_links[key] = linked
+
 
 def issue_url(issue: dict[str, Any]) -> str:
     """Use Linear's canonical URL, falling back to the standard identifier route."""
@@ -58,11 +71,15 @@ def linear_status(
     # is treated as not using Linear, so a missing key or an unreachable API reports a neutral
     # summary instead of an error. Commit subjects and pull request text recover worktree
     # branches named after the task instead; the pull request lookup runs only as a last resort.
+    key = (checkout["path"], branch)
     hints = commit_messages(checkout["path"])
     branch_linked = branch_is_linear(branch)
     if use_pull_requests and not branch_linked and not any(identifiers_in_text(hint) for hint in hints):
         hints.extend(pull_request_hints(checkout["path"], branch))
-    linked = branch_linked or any(identifiers_in_text(hint) for hint in hints)
+    evidence = branch_linked or any(identifiers_in_text(hint) for hint in hints)
+    # Linkage proven earlier stays known, so this poll can report a failure rather than calling
+    # a branch unlinked just because the request that would have proved it did not answer.
+    linked = evidence or _known_links.get(key, False)
     result["linked"] = linked
     result["summary"] = f"Linear: no issue linked to {branch}"
     token = resolve_token(os.environ if env is None else env)
@@ -86,7 +103,10 @@ def linear_status(
         return result
     current = selected_issue(issues, selected)
     result["issues"] = issues
-    result["linked"] = linked or bool(issues)
+    # A successful lookup is authoritative: it either found the issue or proved there is none,
+    # so remembered linkage is replaced rather than added to.
+    result["linked"] = evidence or bool(issues)
+    _remember_link(key, linked=result["linked"])
     result["selected"] = current.get("identifier") if current else None
     result["summary"] = _summary(current, branch)
     return result
