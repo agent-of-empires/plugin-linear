@@ -351,6 +351,20 @@ def test_linear_graphql_rate_limit_sets_reset_backoff(monkeypatch, tmp_path: Pat
     assert refresh._state["backoff_until"] == 1045.0
 
 
+def test_missing_token_does_not_spend_pull_request_lookups(monkeypatch, tmp_path: Path) -> None:
+    _checkout(tmp_path, "status")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+
+    def lookup(*_args, **_kwargs):
+        raise AssertionError("a refresh that cannot reach Linear must not spawn gh")
+
+    monkeypatch.setattr(refresh, "pull_request_hints", lookup)
+    snapshot = refresh.build_snapshot([{"id": "s1", "project_path": str(tmp_path)}], env={})
+
+    assert snapshot["sessions"][0]["linked"] is False
+    assert snapshot["auth"]["present"] is False
+
+
 def test_http_failure_without_cached_issue_data_does_not_mark_snapshot_stale(monkeypatch, tmp_path: Path) -> None:
     _checkout(tmp_path, "feature/unlinked")
     previous = {
