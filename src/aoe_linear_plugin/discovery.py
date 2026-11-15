@@ -12,6 +12,9 @@ GIT_TIMEOUT = 2.0
 COMMIT_HINT_LIMIT = 30
 GH_TIMEOUT = 5.0
 PR_HINT_TTL = 600.0
+_DEFAULT_BRANCHES = frozenset({"main", "master"})
+# Trunk refs whose history a checkout inherits, in the order most likely to exist first.
+_DEFAULT_REFS = ("origin/HEAD", "origin/main", "origin/master", "main", "master")
 
 # ``(path, branch) -> (expires_at, head, hints)``. Pull request text changes rarely, and a poll
 # must not re-run ``gh`` for every slug-named branch, so a lookup is reused until the checkout's
@@ -154,15 +157,19 @@ def _base_ref(path: str) -> str | None:
     """The ref whose history this checkout inherited rather than authored, if any.
 
     ``main`` usually has a remote, and its own commits are all inherited from that remote, so
-    the base branch itself has to exclude its upstream instead of itself.
+    the base branch itself has to exclude its upstream instead of itself. A feature branch has
+    no such inheritance: its upstream is its own publishing remote, and excluding that would
+    drop exactly the commits it authored. A branch with no default ref keeps its whole history.
     """
     branch = _git(path, "symbolic-ref", "--quiet", "--short", "HEAD")
-    for ref in ("origin/HEAD", "origin/main", "origin/master", "main", "master", "@{upstream}"):
+    for ref in _DEFAULT_REFS:
         if ref == branch:
             continue
         if _git(path, "rev-parse", "--verify", "--quiet", ref):
             return ref
-    return None
+    if branch not in _DEFAULT_BRANCHES:
+        return None
+    return _git(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
 
 
 def commit_messages(path: str, limit: int = COMMIT_HINT_LIMIT) -> list[str]:

@@ -8,9 +8,13 @@
 - Rank unprioritized suggestions after Urgent through Low, and restrict assigned-issue queries to eligible workflow states before pagination while retaining local eligibility checks.
 - Keep session badges and panes refreshing after unexpected suggestion failures, report a safe suggestion error without replacing the queue, and retain the Up Next default when workflow settings are cleared.
 - Honor host source switches and suggestion refresh intervals, publish bounded template variables, and keep issue descriptions separate from draft prompts.
-- Skip history inherited from the base branch when reading commit subjects for identifiers, so a checkout on `main` no longer claims an older issue as its work.
-- Do not read a pull request number such as `pr-85` as a team key, so the pull request lookup that finds the real issue still runs; issue no speculative lookups for dependency-update branches.
-- Report a Linear failure on a branch already linked through Linear's VCS metadata instead of calling the checkout unlinked, and skip `gh` pull request lookups during a refresh that has no API token.
+
+## 0.1.1
+
+- Read commit-subject hints only from commits authored on the branch, so a checkout sitting on `main` no longer attributes an inherited `ENG-12` commit to the current session.
+- Treat pull request number slugs such as `athal/pr-85-work` as branch text that is not a Linear issue, so the pull request lookup still discovers the real link.
+- Keep a branch known to be linked when a later poll's Linear request fails, reporting the outage instead of calling the checkout unlinked.
+- Skip the `gh` pull request lookup when no Linear token is configured, since the text cannot change the auth snapshot and each cold checkout costs up to `GH_TIMEOUT`.
 
 ## 0.1.0
 
