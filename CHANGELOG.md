@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- Read commit-subject hints only from commits authored on the branch, so a checkout sitting on `main` no longer attributes an inherited `ENG-12` commit to the current session.
+- Treat pull request number slugs such as `athal/pr-85-work` as branch text that is not a Linear issue, so the pull request lookup still discovers the real link.
+- Keep a branch known to be linked when a later poll's Linear request fails, reporting the outage instead of calling the checkout unlinked.
+- Skip the `gh` pull request lookup when no Linear token is configured, since the text cannot change the auth snapshot and each cold checkout costs up to `GH_TIMEOUT`.
+
 ## 0.1.0
 
 - Match Linear identifiers whose team key starts with a digit (`0DIN-2360`), which worktree branches such as `athal/0din-2360-...` previously never resolved.

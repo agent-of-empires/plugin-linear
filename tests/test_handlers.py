@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from aoe_linear_plugin import handlers
 from aoe_linear_plugin.auth import resolve_token
 from aoe_linear_plugin.handlers import linear_open, linear_status
 
@@ -44,6 +45,51 @@ def test_unlinked_checkout_ignores_api_failures(tmp_path: Path) -> None:
     assert status["linked"] is False
     assert status["error"] is None
     assert status["summary"].startswith("Linear: no issue linked")
+
+
+def test_remembered_linkage_evicts_one_entry_instead_of_every_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(handlers, "_known_links", {})
+    for index in range(handlers._LINK_MEMORY_LIMIT):
+        handlers._known_links[("other", f"branch-{index}")] = True
+
+    # A poll for a checkout already remembered must not cost the others their linkage.
+    handlers._remember_link(("other", "branch-0"), linked=False)
+    assert handlers._known_links[("other", "branch-1")] is True
+    assert len(handlers._known_links) == handlers._LINK_MEMORY_LIMIT
+
+    # A new checkout at capacity displaces the oldest entry and nothing more.
+    handlers._remember_link(("path", "branch"), linked=True)
+    assert len(handlers._known_links) == handlers._LINK_MEMORY_LIMIT
+    assert handlers._known_links[("path", "branch")] is True
+    assert handlers._known_links[("other", "branch-1")] is True
+
+
+def test_status_reports_failure_for_a_branch_linked_only_through_vcs_metadata(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-b", "status", str(tmp_path)], check=True, capture_output=True)
+    issue = {"id": "i1", "identifier": "0DIN-2360", "title": "Status replies", "state": {"name": "In Progress"}}
+    linked = httpx.MockTransport(
+        lambda _: httpx.Response(200, json={"data": {"issueVcsBranchSearch": issue}}),
+    )
+    first = linear_status(
+        str(tmp_path),
+        env={"LINEAR_API_KEY": "token"},
+        transport=linked,
+        use_pull_requests=False,
+    )
+    # The branch is named after the issue's branch, so only Linear's VCS metadata links it.
+    assert first["linked"] is True
+    assert first["selected"] == "0DIN-2360"
+
+    second = linear_status(
+        str(tmp_path),
+        env={"LINEAR_API_KEY": "token"},
+        transport=httpx.MockTransport(lambda _: httpx.Response(503)),
+        use_pull_requests=False,
+    )
+    # An outage must not be reported as an unlinked checkout once linkage was established.
+    assert second["error"] is not None
+    assert second["linked"] is True
+    assert not second["summary"].startswith("Linear: no issue linked")
 
 
 def test_open_without_a_linked_issue_is_not_an_error(tmp_path: Path) -> None:

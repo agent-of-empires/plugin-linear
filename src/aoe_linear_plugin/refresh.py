@@ -143,7 +143,10 @@ def build_snapshot(
         checkout_map = {
             session.get("id"): discover_checkouts(session, ignore_submodules=ignore_submodules) for session in sessions
         }
-        hints = _checkout_hints(sessions, checkout_map, pull_requests=use_pull_requests)
+        # Without a token no Linear fetch is possible, so the pull request text cannot change
+        # any result. `gh` costs up to GH_TIMEOUT per cold checkout while the lock is held, so
+        # the auth snapshot takes the cheap local hints instead.
+        hints = _checkout_hints(sessions, checkout_map, pull_requests=use_pull_requests and token is not None)
         if token is None:
             return _auth_snapshot(sessions, checkout_map, hints)
         targets = sorted({(item["path"], item["branch"]) for checkouts in checkout_map.values() for item in checkouts})
