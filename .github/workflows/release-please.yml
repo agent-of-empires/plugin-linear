@@ -8,11 +8,22 @@ name: Release Please
 # the publish job below calls release.yml to attach the source archive to it.
 # Config: release-please-config.json, .release-please-manifest.json.
 #
-# No PAT is needed. A release created with GITHUB_TOKEN would not start a
+# Publishing needs no PAT: a release created with GITHUB_TOKEN cannot start a
 # separate `release: published` workflow, so release.yml is called as a reusable
-# workflow inside this run instead -- the same token may do the work directly,
-# it just cannot trigger a new run. Without any release (a push to main that
-# only refreshed the PR) the publish job is skipped.
+# workflow inside this run instead. The same token does the work directly, it
+# just cannot trigger a new run. Without any release (a push to main that only
+# refreshed the PR) the publish job is skipped.
+#
+# The release PR still needs a human step. GitHub does not start `pull_request`
+# workflows for a PR opened with GITHUB_TOKEN, so `checks.yml` never reports on
+# it: close and reopen the release PR to run the required checks, or let an
+# admin merge past them.
+#
+# The manifest names the last published version, so its tag has to exist before
+# a run: release-please would otherwise scan from before it and read the missing
+# tag as history to release. The one push where the tag legitimately does not
+# exist yet is the merge of the release PR itself, which is what creates it, so
+# the check below warns only for any other push.
 
 on:
   push:
@@ -38,8 +49,29 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      - name: Check the manifest's last release is tagged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/contents/.release-please-manifest.json" \
+            -H 'Accept: application/vnd.github.raw' \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["."])')"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v${VERSION}" >/dev/null 2>&1; then
+            exit 0
+          fi
+          # Merging the release PR writes VERSION into the manifest and this run
+          # creates the tag, so a missing tag is expected on that commit.
+          SUBJECT="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
+            --jq '.commit.message' | head -n1)"
+          if [ "$SUBJECT" = "chore(release): ${VERSION}" ]; then
+            exit 0
+          fi
+          echo "::warning::v${VERSION} is in the manifest but has no tag, and this push is not the release PR's merge. Create it with 'gh workflow run release.yml -f tag=v${VERSION}' so release-please does not scan from before it."
+
       - id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
         with:
           target-branch: main
 
