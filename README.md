@@ -11,7 +11,7 @@ AoE 1.20.0 or newer and Python 3.10+ are required. Install a clean checkout or s
 
 Set `LINEAR_API_KEY` in the environment inherited by the AoE daemon, then restart the daemon. `LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported. Use a personal API key with read access. The plugin never stores credentials in its manifest, config, logs, or issue cache.
 
-The manifest uses the unverified community ID `agent-of-empires.linear`. There is no published release or tag yet, so `gh:agent-of-empires/plugin-linear` requires explicit consent (`--yes` or interactive confirmation) to fall back to the default branch. Linear is not in AoE's featured index; a featured entry is only needed for a reserved verified namespace or featured listing.
+The manifest uses the unverified community ID `agent-of-empires.linear`. Releases are cut from `main`, but the plugin is not in AoE's featured index, so `gh:agent-of-empires/plugin-linear` requires explicit consent (`--yes` or interactive confirmation) before the host installs it. A featured entry is only needed for a reserved verified namespace or featured listing.
 
 The manifest prompts for `net`, `runtime.worker`, `session.read`, `process.spawn`, `fs.read`, and `browser_open` capabilities. Build creates an isolated venv under `.aoe-build/`; the host launches `.aoe-build/venv/bin/aoe-linear-worker`.
 
@@ -36,7 +36,7 @@ The plugin declares only a `row-badge` and a `pane`. It publishes no status colu
 
 AoE 1.20.0 or newer is required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/` during installation. Python 3.10+ and `pip` access to the package dependencies are required. For a local install, use a clean source tree (no `.venv` or other symlinks); the AoE installer rejects symlinks in local plugin sources.
 
-The manifest uses the unverified community ID `agent-of-empires.linear`. There is no published GitHub release or tag yet. `gh:agent-of-empires/plugin-linear` therefore cannot resolve to a release; AoE can fall back to the unverified default branch only with explicit consent (`--yes` or an interactive confirmation). That branch must contain this manifest before it can install this plugin. Linear is not in AoE's featured index; a featured-index entry is only needed to claim a reserved verified namespace or featured listing.
+The manifest uses the unverified community ID `agent-of-empires.linear`. `gh:agent-of-empires/plugin-linear` resolves to the latest release, but because the id is not in AoE's featured index the host installs it only with explicit consent (`--yes` or an interactive confirmation). A featured-index entry is only needed to claim a reserved verified namespace or featured listing.
 
 ## Commands
 
@@ -84,7 +84,7 @@ On 2026-10-18, the status handler and real NDJSON worker both passed four authen
 
 Anonymized real GraphQL replies are recorded in [`tests/fixtures/linear_live.json`](tests/fixtures/linear_live.json) and used by the offline client, resolver, refresh, and attachment-rendering regressions. String content and identities are redacted, and cycle numbers are replaced with a synthetic value; response envelopes, nulls, and workflow types are retained. Boundary tests still use synthetic inputs. No live-network test or credential is needed to run the suite.
 
-Release automation and the featured-index pin flow remain separate follow-up work: mirror plugin-github's maintainer-gated release PR, matching package/manifest versions, tag-on-merge, checked source release, and canonical `aoe plugin hash` pin proposal. Do not publish a release or change AoE's trust root as part of a code-review update. A host secret-setting type, aliased multi-branch GraphQL batching, and authenticated dashboard screenshots also remain follow-ups.
+Releases are automated with release-please: a merge to `main` refreshes one release PR that bumps `__version__` and the manifest version and writes `CHANGELOG.md`, and merging it tags `vX.Y.Z` for `release.yml` to publish a checked source archive. The featured-index pin flow remains separate follow-up work: the canonical `aoe plugin hash` pin proposal. Do not publish a release or change AoE's trust root as part of a code-review update. A host secret-setting type, aliased multi-branch GraphQL batching, and authenticated dashboard screenshots also remain follow-ups.
 
 ## License
 
