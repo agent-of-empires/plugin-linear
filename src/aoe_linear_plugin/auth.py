@@ -14,7 +14,9 @@ all -- on macOS ``security find-generic-password -w`` fails with
 no token and every worker after it inherits the absence, with no way to correct
 it short of restarting the daemon. Reading a file the user owns is the same
 answer ``gh auth token`` gives from ``~/.config/gh/hosts.yml``, and it is read
-on every refresh, so replacing a rejected key needs no restart.
+on every refresh, so a rejected file-backed key can be replaced without a
+restart. A key taken from the environment cannot be: the daemon fixes its
+environment when it starts.
 
 The plugin still never writes, caches, or logs a token: the file is read and the
 result is held only for the request that needed it.
@@ -40,18 +42,31 @@ def _clean(value: str | None) -> str | None:
 
 
 def token_file(source: Mapping[str, str]) -> Path:
-    """Return the token file to read, honouring an explicit override."""
+    """Return the token file to read.
+
+    ``LINEAR_API_KEY_FILE`` is an override: setting it selects that path and
+    suppresses the default rather than being tried ahead of it.
+    """
     return Path(source.get(KEY_FILE_ENV_VAR) or DEFAULT_KEY_FILE).expanduser()
 
 
 def _read_token_file(path: Path) -> str | None:
-    """Return the file's first line as a token, or None when it is absent or empty."""
+    """Return the file's first line as a token, or None when it is absent or empty.
+
+    Only the first line is read and decoded, and a decoding failure counts as no
+    token. This runs before the callers' Linear error handling, so raising here
+    would turn a malformed file into a failed status request and a refresh that
+    never publishes a snapshot.
+    """
     try:
-        text = path.read_text(encoding="utf-8")
+        with path.open("rb") as handle:
+            first_line = handle.readline()
     except OSError:
         return None
-    lines = text.splitlines()
-    return _clean(lines[0] if lines else None)
+    try:
+        return _clean(first_line.decode("utf-8"))
+    except UnicodeDecodeError:
+        return None
 
 
 def resolve_token(env: Mapping[str, str] | None = None) -> str | None:

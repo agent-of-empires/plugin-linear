@@ -59,8 +59,9 @@ class LinearClient:
             raise LinearNetworkError("Could not reach Linear. Check network connectivity.") from exc
         if response.status_code in (401, 403):
             raise LinearAuthError(
-                "Linear rejected the API key. Replace LINEAR_API_KEY, or the key in ~/.config/linear/api_key, "
-                "and the next refresh uses it."
+                "Linear rejected the API key. A key in LINEAR_API_KEY_FILE or ~/.config/linear/api_key is read "
+                "again on the next refresh; a key taken from the environment changes only when the daemon "
+                "is restarted with the new value."
             )
         if response.status_code == 429:
             retry_after = _rate_limit_delay(response.headers)

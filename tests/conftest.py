@@ -7,12 +7,17 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _no_token_file(monkeypatch, tmp_path_factory):
-    """Resolver tests never read the developer's real ~/.config/linear/api_key.
+def _no_credentials(monkeypatch, tmp_path_factory):
+    """Resolver tests never see the developer's real token, in a file or in the environment.
 
-    Token-file behaviour has its own coverage; every other test passes an explicit
-    `env` mapping and expects that to be the only source.
+    Patching the default path keeps ~/.config/linear/api_key out of reach. Deleting
+    the environment variables covers the tests that call the resolver with no explicit
+    mapping, where an exported key would otherwise win, and an inherited
+    LINEAR_API_KEY_FILE would route around the patched default. Token-file behaviour
+    has its own coverage.
     """
+    for name in ("LINEAR_API_KEY", "LINEAR_TOKEN", "LINEAR_API_KEY_FILE"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(
         "aoe_linear_plugin.auth.DEFAULT_KEY_FILE",
         str(tmp_path_factory.getbasetemp() / "no-token-file"),
