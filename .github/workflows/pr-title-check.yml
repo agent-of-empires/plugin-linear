@@ -1,5 +1,8 @@
 name: PR Title Check
 
+# Enforce Conventional Commits on the PR title. Squash-merge makes the title the
+# commit subject release-please consumes for the version bump and CHANGELOG.md.
+
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened]
@@ -16,6 +19,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # Keep in sync with changelog-sections in release-please-config.json.
           types: |
             feat
             fix

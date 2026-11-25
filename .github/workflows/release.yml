@@ -1,0 +1,173 @@
+name: Release
+
+# Merging the release-please PR (release-please.yml) creates the `vX.Y.Z` tag and
+# a GitHub Release whose notes are that version's CHANGELOG.md section, having
+# already bumped src/aoe_linear_plugin/__init__.py and aoe-plugin.toml. This
+# workflow re-runs the checks, refuses a tag that disagrees with either version
+# field, and attaches a source archive and its sha256 to that release. Agent of
+# Empires installs the plugin from the archive (or from source).
+#
+# It runs two ways. `workflow_call` is how release-please.yml reaches it on the
+# run that created the release: a release created with GITHUB_TOKEN starts no
+# `published` workflow, and calling a reusable workflow is not an event, so no
+# PAT is involved. `workflow_dispatch` publishes a version cut by hand before
+# release-please was adopted, creating the release when there is none yet.
+#
+# A dispatch may name a tag that does not exist yet, which is how the 0.1.1
+# bootstrap is cut: checkout cannot resolve a missing ref, so the job resolves
+# the tag when it is there and otherwise releases the dispatched commit, letting
+# `gh release create --target` put the tag on that same commit. Creating a tag
+# that way is allowed from main only, and only when the tag lookup actually
+# answered that the tag is absent.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.1)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.1)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  # `inputs` covers both entry points, so checkout and publishing agree.
+  RELEASE_TAG: ${{ inputs.tag }}
+
+# Two runs for one tag would race over the same release: one flips it from
+# created to uploaded or replaces its assets while the other does the same.
+# Serialize them, and never cancel one mid-publication. Other tags are
+# unaffected, so an unrelated release never waits.
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve the ref to release
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Only a 404 means "no such tag". `gh api -i` prints the status line
+          # first (and exits non-zero for an error status), so a rate limit,
+          # 5xx or network failure is told apart from an absent tag instead of
+          # silently falling back to this commit and clobbering the real
+          # release's assets with a different commit's archive.
+          RESPONSE="$(gh api -i "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" 2>&1 || true)"
+          STATUS="$(printf '%s\n' "$RESPONSE" | awk 'NR == 1 && /^HTTP\// {print $2}')"
+          case "$STATUS" in
+            200)
+              echo "ref=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              # Releases are cut from main. A dispatch on a branch that also
+              # happened to carry the same version fields would otherwise
+              # publish unmerged code and tag it as the release.
+              if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+                echo "::error::${RELEASE_TAG} does not exist, and only main may create it. This run is on ${GITHUB_REF}."
+                exit 1
+              fi
+              echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+              echo "::notice::${RELEASE_TAG} does not exist yet; releasing ${GITHUB_SHA} and tagging it there."
+              ;;
+            *)
+              echo "::error::Could not look up ${RELEASE_TAG} (HTTP status '${STATUS:-none}'). Not treating that as a missing tag."
+              printf '%s\n' "$RESPONSE"
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.24"
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Sync dependencies
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Pytest
+        run: uv run pytest
+
+      - name: Validate version matches tag
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${RELEASE_TAG#v}"
+          INIT_VERSION="$(python3 -c 'import pathlib,re; print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("src/aoe_linear_plugin/__init__.py").read_text()).group(1))')"
+          MANIFEST_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("aoe-plugin.toml","rb"))["version"])')"
+          echo "tag:             $TAG_VERSION"
+          echo "__init__.py:     $INIT_VERSION"
+          echo "aoe-plugin.toml: $MANIFEST_VERSION"
+          if [ "$INIT_VERSION" != "$TAG_VERSION" ] || [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag $RELEASE_TAG disagrees with __init__.py ($INIT_VERSION) or aoe-plugin.toml ($MANIFEST_VERSION)."
+            echo "Tags come from merging the release-please PR, which bumps both fields first."
+            exit 1
+          fi
+
+      - name: Build source archive
+        run: |
+          set -euo pipefail
+          NAME="plugin-linear-${RELEASE_TAG}"
+          git archive --format=tar.gz --prefix="${NAME}/" -o "${NAME}.tar.gz" HEAD
+          sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+          cat "${NAME}.tar.gz.sha256"
+
+      - name: Extract release notes
+        run: |
+          set -euo pipefail
+          # The release PR wrote this version's section into CHANGELOG.md. Accept
+          # both the release-please heading (`## [0.1.2](link) (date)`) and the
+          # bare `## 0.1.1` headings the earlier releases were written with.
+          awk -v v="${RELEASE_TAG#v}" '
+            index($0, "## ") == 1 {
+              if (found) exit
+              found = (index($0, "## [" v "]") == 1) || ($0 == "## " v)
+              next
+            }
+            found
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "No user-facing changes." > release-notes.md
+          fi
+          cat release-notes.md
+
+      - name: Attach the archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NAME="plugin-linear-${RELEASE_TAG}"
+          # release-please already created this release; only a hand-cut tag from
+          # the dispatch fallback still needs one.
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" \
+              "${NAME}.tar.gz" "${NAME}.tar.gz.sha256" --clobber
+          else
+            gh release create "${RELEASE_TAG}" \
+              --target "$(git rev-parse HEAD)" \
+              --title "${RELEASE_TAG}" \
+              --notes-file release-notes.md \
+              "${NAME}.tar.gz" "${NAME}.tar.gz.sha256"
+          fi
