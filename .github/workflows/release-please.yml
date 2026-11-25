@@ -65,9 +65,12 @@ jobs:
           # creates the tag, so a missing tag is expected on that commit.
           SUBJECT="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
             --jq '.commit.message' | head -n1)"
-          if [ "$SUBJECT" = "chore(release): ${VERSION}" ]; then
-            exit 0
-          fi
+          # Squash merges keep the PR title and append the PR number, so the
+          # subject is `chore(release): X.Y.Z (#N)`. Match the version exactly,
+          # or followed by a space, so `0.1.10` never passes as `0.1.1`.
+          case "$SUBJECT" in
+            "chore(release): ${VERSION}" | "chore(release): ${VERSION} "*) exit 0 ;;
+          esac
           echo "::warning::v${VERSION} is in the manifest but has no tag, and this push is not the release PR's merge. Create it with 'gh workflow run release.yml -f tag=v${VERSION}' so release-please does not scan from before it."
 
       - id: release
