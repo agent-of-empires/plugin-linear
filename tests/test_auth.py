@@ -53,6 +53,41 @@ def test_an_undecodable_first_line_resolves_to_no_token(tmp_path: Path) -> None:
     assert resolve_token({"LINEAR_API_KEY_FILE": str(path)}) is None
 
 
+def test_carriage_returns_also_end_the_first_line(tmp_path: Path) -> None:
+    """A file saved with bare CR separators still yields just its token."""
+    path = tmp_path / "api_key"
+    path.write_bytes(b"file-token\rsecond line\r")
+    assert resolve_token({"LINEAR_API_KEY_FILE": str(path)}) == "file-token"
+
+
+def test_a_carriage_return_before_undecodable_bytes_keeps_the_token(tmp_path: Path) -> None:
+    """The CR ends the line, so the undecodable bytes after it are never read."""
+    path = tmp_path / "api_key"
+    path.write_bytes(b"file-token\r\xff")
+    assert resolve_token({"LINEAR_API_KEY_FILE": str(path)}) == "file-token"
+
+
+def test_a_byte_order_mark_is_not_part_of_the_token(tmp_path: Path) -> None:
+    """A key file edited on Windows must not carry U+FEFF into the header."""
+    path = tmp_path / "api_key"
+    path.write_bytes(b"\xef\xbb\xbffile-token\n")
+    assert resolve_token({"LINEAR_API_KEY_FILE": str(path)}) == "file-token"
+
+
+def test_reading_the_file_is_bounded(tmp_path: Path) -> None:
+    """A path holding one huge line is read for its head, not to the end."""
+    path = tmp_path / "api_key"
+    path.write_bytes(b"a" * 10000)
+    token = resolve_token({"LINEAR_API_KEY_FILE": str(path)})
+    assert token is not None
+    assert len(token) == 4096
+
+
+def test_an_unresolvable_home_in_the_override_resolves_to_no_token() -> None:
+    """expanduser() raises for a mistyped ``~user``; resolution must not."""
+    assert resolve_token({"LINEAR_API_KEY_FILE": "~aoe-no-such-user-override/key"}) is None
+
+
 def test_the_override_does_not_fall_through_to_the_default(monkeypatch, tmp_path: Path) -> None:
     """LINEAR_API_KEY_FILE selects a path; the default is not tried after it."""
     default = tmp_path / "default"
