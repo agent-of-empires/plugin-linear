@@ -18,7 +18,7 @@ from aoe_linear_plugin.discovery import commit_messages, discover_checkouts, pul
 from aoe_linear_plugin.errors import LinearError
 from aoe_linear_plugin.resolver import branch_is_linear, identifiers_in_text, resolve_branch
 
-AUTH_HINT = "Set LINEAR_API_KEY to load Linear issue data."
+AUTH_HINT = "Set LINEAR_API_KEY to load Linear issue data, or write the key to ~/.config/linear/api_key."
 RATE_HINT = "Linear rate limit active; refresh will retry later."
 
 _lock = threading.Lock()

@@ -7,6 +7,19 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _no_token_file(monkeypatch, tmp_path_factory):
+    """Resolver tests never read the developer's real ~/.config/linear/api_key.
+
+    Token-file behaviour has its own coverage; every other test passes an explicit
+    `env` mapping and expects that to be the only source.
+    """
+    monkeypatch.setattr(
+        "aoe_linear_plugin.auth.DEFAULT_KEY_FILE",
+        str(tmp_path_factory.getbasetemp() / "no-token-file"),
+    )
+
+
+@pytest.fixture(autouse=True)
 def _no_pull_request_lookup(monkeypatch):
     """Unit tests never spawn `gh`; the fallback has dedicated coverage with a stub."""
 
