@@ -301,6 +301,30 @@ def test_refresh_requested_while_suggestions_are_running_reruns_without_waiting_
     assert started.wait(timeout=5)
 
 
+def test_discovery_started_before_a_scope_change_does_not_replace_the_queue(monkeypatch) -> None:
+    """A snapshot paged against superseded settings must keep the last-good queue."""
+    runtime = Runtime(stdout=io.StringIO())
+    monkeypatch.setattr(worker, "_ids", itertools.count(100))
+    runtime.suggestion_settings = {"suggestion_up_next_states": "Up Next"}
+    runtime.inbox.put({"id": 100, "result": {"sources": [{"criterion": "assigned_up_next", "enabled": True}]}})
+    monkeypatch.setattr(
+        worker.suggestion_data,
+        "build_suggestions",
+        lambda settings: [{"id": settings["suggestion_up_next_states"]}],
+    )
+    published: list[list[dict[str, object]]] = []
+    monkeypatch.setattr(runtime, "_publish_suggestion_items", published.append)
+    runtime._start_suggestion_refresh()
+    stale = runtime.inbox.get(timeout=5)
+
+    runtime.suggestion_settings["suggestion_up_next_states"] = "Todo"
+    runtime.handle(stale)
+    runtime._flush_suggestions()
+
+    assert published == []
+    assert runtime.suggestion_refresh_due is True
+
+
 def test_issue_selection_repaints_cached_pane_without_network() -> None:
     output = io.StringIO()
     runtime = Runtime(stdin=io.StringIO(""), stdout=output)

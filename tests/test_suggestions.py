@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from aoe_linear_plugin import suggestions as suggestion_data
-from aoe_linear_plugin.client import LinearClient
+from aoe_linear_plugin.client import LinearClient, note_rate_limit
 from aoe_linear_plugin.errors import LinearGraphQLError, LinearRateLimitError
 from aoe_linear_plugin.suggestions import build_suggestions, discover_suggestions
 
@@ -62,6 +62,26 @@ def test_suggestion_polling_stops_after_a_rate_limit_until_the_reset(monkeypatch
 
     assert len(requests) == 1
     assert 0 < error.value.retry_after <= 30
+
+
+def test_paging_stops_when_session_polling_arms_the_cooldown() -> None:
+    """A page fetched after another surface hit the limit would spend a rejected request."""
+    client = Client([page([issue()], has_next=True, cursor="cursor-1")])
+    read_page = client.execute
+
+    def execute(query, variables=None):
+        result = read_page(query, variables)
+        if "SuggestionViewer" not in query:
+            note_rate_limit(30)
+        return result
+
+    client.execute = execute
+
+    with pytest.raises(LinearRateLimitError):
+        discover_suggestions(client)
+
+    # The viewer and the first page only; the second page was never requested.
+    assert len(client.calls) == 2
 
 
 def test_discovery_exposes_mapping_key_and_template_variables_without_embedding_source_text():

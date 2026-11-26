@@ -26,6 +26,16 @@ def _setting_list(value: Any, default: list[str], name: str) -> list[str]:
     return sorted({part.strip() for part in value.split(",") if part.strip()}) or default
 
 
+def _refuse_while_limited() -> None:
+    """Stop before spending a request Linear is currently rejecting for this credential."""
+    remaining = rate_limit_cooldown()
+    if remaining > 0:
+        raise LinearRateLimitError(
+            "Linear rate limit reached; suggestion refresh will retry after the reset.",
+            retry_after=remaining,
+        )
+
+
 def _scoped(issue: dict[str, Any], teams: set[str], projects: set[str]) -> bool:
     team = issue.get("team") or {}
     project = issue.get("project") or {}
@@ -142,6 +152,9 @@ def discover_suggestions(
       }
     }"""
     while True:
+        # Session polling shares this credential, so a later page during a cooldown the other
+        # surfaces established would only spend a request Linear is already rejecting.
+        _refuse_while_limited()
         result = client.execute(
             query,
             {
@@ -195,11 +208,6 @@ def build_suggestions(
     token = resolve_token(os.environ if env is None else env)
     if token is None:
         raise LinearError("Set LINEAR_API_KEY in the AoE daemon's environment and restart the daemon.")
-    remaining = rate_limit_cooldown()
-    if remaining > 0:
-        raise LinearRateLimitError(
-            "Linear rate limit reached; suggestion refresh will retry after the reset.",
-            retry_after=remaining,
-        )
+    _refuse_while_limited()
     with LinearClient(token) as client:
         return discover_suggestions(client, settings=settings)

@@ -225,6 +225,8 @@ class Runtime:
         except Exception:  # noqa: BLE001  one discovery crash must not end the worker.
             sys.stderr.write("Linear suggestion refresh failed unexpectedly.\n")
             outcome = {"message": "Linear suggestion refresh failed unexpectedly."}
+        # The loop drops this result if the scope changed while it was paging.
+        outcome["settings"] = settings
         self.inbox.put({"method": SUGGESTIONS_DONE, "params": outcome})
 
     def _finish_suggestions(self, params: Any) -> None:
@@ -241,6 +243,12 @@ class Runtime:
         if self.suggestion_refresh_pending:
             self.suggestion_refresh_pending = False
             self.suggestion_refresh_due = True
+        settings = outcome.get("settings")
+        if isinstance(settings, dict) and settings != self.suggestion_settings:
+            # Workflow states or scopes changed while this query was paging, so the snapshot
+            # describes a superseded queue: keep the last-good one and refetch instead.
+            self.suggestion_refresh_due = True
+            return
         items = outcome.get("items")
         if isinstance(items, list):
             self._publish_suggestion_items(items)
