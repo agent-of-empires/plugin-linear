@@ -15,6 +15,10 @@ from aoe_linear_plugin.discovery import checkout_for_path, commit_messages, pull
 from aoe_linear_plugin.errors import LinearError
 from aoe_linear_plugin.resolver import branch_is_linear, identifiers_in_text, resolve_branch, selected_issue
 
+AUTH_HINT = (
+    "Set LINEAR_API_KEY (or LINEAR_TOKEN) with Linear read access, or write the key to ~/.config/linear/api_key."
+)
+
 # ``(path, branch) -> linked``. A branch can be linked only through Linear's VCS metadata, which
 # no local hint names (an issue whose branch is ``status``). The command path polls, so a lookup
 # failure after an earlier success must report the outage instead of the checkout looking
@@ -94,7 +98,7 @@ def linear_status(
     if token is None:
         if linked:
             result["summary"] = "Linear: set LINEAR_API_KEY to show linked issues"
-            result["error"] = {"kind": "auth", "hint": "Set LINEAR_API_KEY (or LINEAR_TOKEN) with Linear read access."}
+            result["error"] = {"kind": "auth", "hint": AUTH_HINT}
         return result
     try:
         with LinearClient(token, transport=transport) as client:
