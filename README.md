@@ -7,7 +7,7 @@ The Linear plugin resolves issue state for session branches and displays it in t
 
 ## Install and authenticate
 
-AoE 1.20.0 or newer and Python 3.10+ are required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/`; `pip` access to package dependencies is required. Local source trees must not contain symlinks such as `.venv`.
+AoE 1.27.0 or newer and Python 3.10+ are required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/`; `pip` access to package dependencies is required. Local source trees must not contain symlinks such as `.venv`.
 
 The token is resolved on every refresh, in a fixed order: `LINEAR_API_KEY`, then `LINEAR_TOKEN` (`LINEAR_TOKEN` is an alternate name for a personal API key, not an OAuth access token; OAuth authentication is not supported), then a token file: the one named by `LINEAR_API_KEY_FILE` when it is set, which is an override and suppresses the default, otherwise `~/.config/linear/api_key`. The file holds one line, mode `0600`. Use a personal API key with read access. A file is read per refresh, so replacing a rejected file-backed key needs no daemon restart; a key taken from the environment changes only when the daemon is restarted with the new value.
 
@@ -36,13 +36,13 @@ The plugin declares only a `row-badge` and a `pane`. It publishes no status colu
 
 ## Install from source
 
-AoE 1.20.0 or newer is required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/` during installation. Python 3.10+ and `pip` access to the package dependencies are required. For a local install, use a clean source tree (no `.venv` or other symlinks); the AoE installer rejects symlinks in local plugin sources.
+AoE 1.27.0 or newer is required. Install a clean checkout or source archive with `aoe plugin install <source>`. The host builds the Python worker into `.aoe-build/` during installation. Python 3.10+ and `pip` access to the package dependencies are required. For a local install, use a clean source tree (no `.venv` or other symlinks); the AoE installer rejects symlinks in local plugin sources.
 
 The manifest uses the unverified community ID `agent-of-empires.linear`. `gh:agent-of-empires/plugin-linear` resolves to the latest release, but because the id is not in AoE's featured index the host installs it only with explicit consent (`--yes` or an interactive confirmation). A featured-index entry is only needed to claim a reserved verified namespace or featured listing.
 
 ## Commands
 
-The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.agent-of-empires.linear.status`, `plugin.agent-of-empires.linear.open`, and `plugin.agent-of-empires.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
+The CLI exposes them as `aoe linear status`, `aoe linear refresh`, and `aoe linear open`; that nesting comes from the manifest's `[[command_groups]]` entry, which needs SDK API 26. The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.agent-of-empires.linear.status`, `plugin.agent-of-empires.linear.open`, and `plugin.agent-of-empires.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
 
 ### GitHub plugin feature mapping
 
