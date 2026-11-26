@@ -39,6 +39,11 @@ def test_only_the_first_line_is_used_as_the_token(tmp_path: Path) -> None:
     assert resolve_token({"LINEAR_API_KEY_FILE": str(path)}) == "first-token"
 
 
+def test_leading_blank_lines_are_skipped(tmp_path: Path) -> None:
+    """A file that starts with a blank line still yields its token."""
+    assert resolve_token({"LINEAR_API_KEY_FILE": str(_key_file(tmp_path, "\n  \ntok\n"))}) == "tok"
+
+
 def test_a_valid_first_line_survives_undecodable_later_bytes(tmp_path: Path) -> None:
     """Undecodable bytes after the token are never read, so they cannot raise."""
     path = tmp_path / "api_key"

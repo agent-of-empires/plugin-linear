@@ -58,31 +58,32 @@ def token_file(source: Mapping[str, str]) -> Path:
 
 
 def _read_token_file(path: Path) -> str | None:
-    """Return the file's first line as a token, or None when it is absent or empty.
+    """Return the file's first non-blank line as a token, or None when there is none.
 
-    Only the first line is read and decoded, and a decoding failure counts as no
-    token. This runs before the callers' Linear error handling, so raising here
-    would turn a malformed file into a failed status request and a refresh that
-    never publishes a snapshot.
+    Only the head of the file is read, and a decoding failure counts as no token.
+    This runs before the callers' Linear error handling, so raising here would
+    turn a malformed file into a failed status request and a refresh that never
+    publishes a snapshot.
 
-    The head of the file is split with ``splitlines()`` rather than read with
-    ``readline()``, so a file saved with bare carriage returns still yields its
-    first-line token instead of one value with a stray CR inside it. Decoding
-    with ``utf-8-sig`` drops a byte-order mark, which ``strip()`` leaves in place
-    and Linear then rejects.
+    The head is split with ``splitlines()`` rather than read with ``readline()``,
+    so a file saved with bare carriage returns still yields its token instead of
+    one value with a stray CR inside it. Leading blank lines are skipped. The
+    first line is decoded with ``utf-8-sig`` to drop a byte-order mark, which
+    ``strip()`` leaves in place and Linear then rejects.
     """
     try:
         with path.open("rb") as handle:
-            head = handle.readline(_MAX_HEAD_BYTES)
+            head = handle.read(_MAX_HEAD_BYTES)
     except OSError:
         return None
-    lines = head.splitlines()
-    if not lines:
-        return None
-    try:
-        return _clean(lines[0].decode("utf-8-sig"))
-    except UnicodeDecodeError:
-        return None
+    for index, line in enumerate(head.splitlines()):
+        try:
+            token = _clean(line.decode("utf-8-sig" if index == 0 else "utf-8"))
+        except UnicodeDecodeError:
+            return None
+        if token is not None:
+            return token
+    return None
 
 
 def resolve_token(env: Mapping[str, str] | None = None) -> str | None:
