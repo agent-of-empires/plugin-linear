@@ -34,7 +34,11 @@ def test_worker_status_request_returns_actionable_auth_error(tmp_path: Path, mon
 def test_worker_host_smoke_answers_startup_rpcs_and_status(tmp_path: Path) -> None:
     """Stream against the real worker so startup replies cannot be dropped as an input race."""
     subprocess.run(["git", "init", "-b", "ENG-8-fix", str(tmp_path)], check=True, capture_output=True)
-    environment = {key: value for key, value in os.environ.items() if key not in {"LINEAR_API_KEY", "LINEAR_TOKEN"}}
+    token_vars = {"LINEAR_API_KEY", "LINEAR_TOKEN", "LINEAR_API_KEY_FILE"}
+    environment = {key: value for key, value in os.environ.items() if key not in token_vars}
+    # The child is a fresh interpreter, so the fixture's patched default path does not
+    # reach it; an absent override keeps it off the developer's real ~/.config key too.
+    environment["LINEAR_API_KEY_FILE"] = str(tmp_path / "absent-api-key")
     output = []
     with (
         subprocess.Popen(

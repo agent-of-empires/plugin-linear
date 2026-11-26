@@ -2,6 +2,8 @@
 
 ## 0.1.1
 
+- Resolve the token from `~/.config/linear/api_key` (or `LINEAR_API_KEY_FILE`) when the environment has none, so a worker authenticates even when its daemon was started from an SSH session that could not read the Keychain; the key is re-read on every refresh, so replacing it needs no restart.
+- Read a bounded head of the key file and end its first line at a carriage return as well as a newline, drop a byte-order mark, and treat an unresolvable `~user` in `LINEAR_API_KEY_FILE` as no token, so a malformed or mistyped file reports an auth state instead of failing the status request and stopping refresh publication.
 - Read commit-subject hints only from commits authored on the branch, so a checkout sitting on `main` no longer attributes an inherited `ENG-12` commit to the current session.
 - Treat pull request number slugs such as `athal/pr-85-work` as branch text that is not a Linear issue, so the pull request lookup still discovers the real link.
 - Keep a branch known to be linked when a later poll's Linear request fails, reporting the outage instead of calling the checkout unlinked.
