@@ -1,0 +1,106 @@
+name: Release Please
+
+# Mirrors the core repo's release-plz flow. Every push to main refreshes one
+# `chore(release): X.Y.Z` PR that bumps `__version__` in
+# src/aoe_linear_plugin/__init__.py and the version in aoe-plugin.toml, and
+# writes CHANGELOG.md from the commit subjects. Merging that PR creates the
+# `vX.Y.Z` tag and a GitHub Release whose notes are that changelog section, and
+# the publish job below calls release.yml to attach the source archive to it.
+# Config: release-please-config.json, .release-please-manifest.json.
+#
+# Publishing needs no PAT: a release created with GITHUB_TOKEN cannot start a
+# separate `release: published` workflow, so release.yml is called as a reusable
+# workflow inside this run instead. The same token does the work directly, it
+# just cannot trigger a new run. Without any release (a push to main that only
+# refreshed the PR) the publish job is skipped.
+#
+# The release PR still needs a human step. A PR opened or updated with
+# GITHUB_TOKEN does not start `pull_request` workflows on its own: GitHub
+# creates those runs in an approval-required state instead, so someone with
+# write access has to approve them in the merge box ("Approve workflows to
+# run") before `checks.yml` reports the required check. Pushing another commit
+# or closing and reopening does not lift that; approval does.
+#
+# The manifest names the last published version, so its tag has to exist before
+# a run: release-please would otherwise scan from before it and read the missing
+# tag as history to release. The one push where the tag legitimately does not
+# exist yet is the merge of the release PR itself, which is what creates it, so
+# the check below warns only for any other push.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel: a cancelled run can leave the release PR half-updated.
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Update release PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Check the manifest's last release is tagged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/contents/.release-please-manifest.json" \
+            -H 'Accept: application/vnd.github.raw' \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["."])')"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v${VERSION}" >/dev/null 2>&1; then
+            exit 0
+          fi
+          # Merging the release PR writes VERSION into the manifest and this run
+          # creates the tag, so a missing tag is expected on that commit.
+          SUBJECT="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
+            --jq '.commit.message' | head -n1)"
+          # Squash merges keep the PR title and append the PR number, so the
+          # subject is `chore(release): X.Y.Z (#N)`. Match the version exactly,
+          # or followed by a space, so `0.1.10` never passes as `0.1.1`.
+          case "$SUBJECT" in
+            "chore(release): ${VERSION}" | "chore(release): ${VERSION} "*) exit 0 ;;
+          esac
+          echo "::warning::v${VERSION} is in the manifest but has no tag, and this push is not the release PR's merge. Create it with 'gh workflow run release.yml -f tag=v${VERSION}' so release-please does not scan from before it."
+
+      - id: release
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          target-branch: main
+
+      # `pr` is a JSON object carrying the release PR's title and body. Passed
+      # through the environment it is data, not shell syntax: interpolated into
+      # the script instead, the quotes in `chore(release): X.Y.Z` end the shell
+      # string and the parentheses fail the step after the PR was updated.
+      - name: Report
+        env:
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          printf 'released=%s\ntag=%s\npr=%s\n' \
+            "${RELEASE_CREATED:-}" "${RELEASE_TAG:-}" "${RELEASE_PR:-}"
+
+  # Runs only when the step above actually cut a release, and reuses the same
+  # file a by-hand publish uses (`gh workflow run release.yml -f tag=vX.Y.Z`).
+  publish:
+    name: Publish ${{ needs.release-please.outputs.tag_name }}
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
