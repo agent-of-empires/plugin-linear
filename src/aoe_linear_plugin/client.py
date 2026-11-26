@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 import time
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -24,6 +25,24 @@ ISSUE_FIELDS = """
   attachments { nodes { id title subtitle url } }
   comments(last: 10) { nodes { id body user { name } } }
 """
+
+# Linear rate limits are per credential, not per caller: every surface (session refresh,
+# suggestion polling, status) shares the reset Linear advertised.
+_cooldown_lock = threading.Lock()
+_cooldown = {"until": 0.0}
+
+
+def rate_limit_cooldown() -> float:
+    """Seconds left before Linear accepts requests again."""
+    with _cooldown_lock:
+        return max(0.0, _cooldown["until"] - time.monotonic())
+
+
+def note_rate_limit(retry_after: float | None) -> None:
+    """Remember Linear's reset time so later polls do not spend requests on a limited key."""
+    until = time.monotonic() + (retry_after if retry_after is not None else 60.0)
+    with _cooldown_lock:
+        _cooldown["until"] = max(_cooldown["until"], until)
 
 
 class LinearClient:
@@ -63,6 +82,7 @@ class LinearClient:
             )
         if response.status_code == 429:
             retry_after = _rate_limit_delay(response.headers)
+            note_rate_limit(retry_after)
             raise LinearRateLimitError(
                 "Linear rate limit reached; cached issue data is being shown.",
                 retry_after=retry_after,
@@ -158,9 +178,11 @@ def _graphql_error(errors: Any, headers: httpx.Headers) -> LinearGraphQLError | 
     for error in items:
         extensions = error.get("extensions")
         if isinstance(extensions, dict) and extensions.get("code") == "RATELIMITED":
+            delay = _rate_limit_delay(headers)
+            note_rate_limit(delay)
             return LinearRateLimitError(
                 "Linear rate limit reached; cached issue data is being shown.",
-                retry_after=_rate_limit_delay(headers),
+                retry_after=delay,
             )
     messages = [str(error.get("message", "GraphQL error"))[:200] for error in items[:3]]
     safe_message = "; ".join(messages) or "GraphQL operation failed"

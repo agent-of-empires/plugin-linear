@@ -7,8 +7,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from aoe_linear_plugin.auth import resolve_token
-from aoe_linear_plugin.client import LinearClient
-from aoe_linear_plugin.errors import LinearError, LinearGraphQLError
+from aoe_linear_plugin.client import LinearClient, rate_limit_cooldown
+from aoe_linear_plugin.errors import LinearError, LinearGraphQLError, LinearRateLimitError
 
 MAX_ITEMS = 500
 CRITERION = "assigned_up_next"
@@ -195,5 +195,11 @@ def build_suggestions(
     token = resolve_token(os.environ if env is None else env)
     if token is None:
         raise LinearError("Set LINEAR_API_KEY in the AoE daemon's environment and restart the daemon.")
+    remaining = rate_limit_cooldown()
+    if remaining > 0:
+        raise LinearRateLimitError(
+            "Linear rate limit reached; suggestion refresh will retry after the reset.",
+            retry_after=remaining,
+        )
     with LinearClient(token) as client:
         return discover_suggestions(client, settings=settings)

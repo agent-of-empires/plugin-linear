@@ -5,6 +5,14 @@ from pathlib import Path
 
 import pytest
 
+from aoe_linear_plugin import client
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit_cooldown(monkeypatch):
+    """The Linear cooldown is process-wide; one test's rate limit must not leak into the next."""
+    monkeypatch.setitem(client._cooldown, "until", 0.0)
+
 
 @pytest.fixture(autouse=True)
 def _no_pull_request_lookup(monkeypatch):

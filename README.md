@@ -2,6 +2,7 @@
 
 A refresh failure for a checkout with cached issues keeps that data visible and marks the affected session stale.
 A failure for a checkout with no cached issues is shown as unavailable, not stale; cached issues from other checkouts alone do not mark the session stale.
+A rate limit is session-wide rather than per checkout: it comes from one request, then every request on that key stops until the advertised reset. Sessions with cached issues are marked stale, and checkouts with no cached issues show the rate-limit state, including sessions whose own request was never sent.
 
 The Linear plugin resolves issue state for session branches and displays it in the session list and a Linear pane. It uses Linear's GraphQL API directly and does not shell out to `linear`. When a branch, its recent commits, and the session title name no issue, it can ask the GitHub CLI (`gh`) for the branch's pull request title, body, and comments and read a Linear link from that text; this lookup is optional, cached per commit, and controlled by the `use_pull_requests` setting.
 

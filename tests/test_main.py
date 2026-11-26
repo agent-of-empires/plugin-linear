@@ -7,6 +7,7 @@ import os
 import selectors
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import httpx
@@ -261,6 +262,36 @@ def test_settings_change_notification_marks_suggestions_due(monkeypatch) -> None
     assert runtime.suggestion_refresh_due is True
 
 
+def test_refresh_requested_while_suggestions_are_running_reruns_without_waiting_for_the_deadline(
+    monkeypatch,
+) -> None:
+    """A refresh that arrives during discovery must rerun now, not at the next deadline."""
+    runtime = Runtime(stdout=io.StringIO())
+    started = threading.Event()
+    monkeypatch.setattr(runtime, "_suggestion_enabled", lambda: True)
+    monkeypatch.setattr(runtime, "_discover_suggestions", lambda _settings: started.set())
+    monkeypatch.setattr(runtime, "_publish_suggestion_items", lambda _items: None)
+    runtime.next_suggestion_refresh = float("inf")
+
+    runtime.suggestions_in_flight = True
+    runtime.handle({"method": "suggestions.refresh", "params": {}})
+    runtime._start_suggestion_refresh()
+
+    assert not started.is_set()
+    assert runtime.suggestion_refresh_pending is True
+    assert runtime.suggestion_refresh_due is False
+    assert runtime.next_suggestion_refresh == float("inf")
+
+    # The discovery result wakes the loop, which reruns instead of sleeping until the deadline.
+    runtime.handle({"method": worker.SUGGESTIONS_DONE, "params": {"items": []}})
+    runtime._flush_suggestions()
+
+    assert runtime.suggestion_refresh_due is True
+    assert runtime.suggestion_refresh_pending is False
+    runtime._start_suggestion_refresh()
+    assert started.wait(timeout=5)
+
+
 def test_issue_selection_repaints_cached_pane_without_network() -> None:
     output = io.StringIO()
     runtime = Runtime(stdin=io.StringIO(""), stdout=output)
@@ -290,6 +321,30 @@ def test_issue_selection_repaints_cached_pane_without_network() -> None:
     assert [row["prefix"] for row in selector["children"]] == ["ENG-1"]
 
 
+def test_suggestion_discovery_does_not_block_command_replies(monkeypatch) -> None:
+    """Paging Linear off the loop thread keeps status and refresh commands answering."""
+    release = threading.Event()
+    output = io.StringIO()
+    runtime = Runtime(stdout=output)
+    monkeypatch.setattr(runtime, "_suggestion_enabled", lambda: True)
+
+    def discover(_settings: dict[str, object]) -> list[object]:
+        release.wait(5)
+        return []
+
+    monkeypatch.setattr(worker.suggestion_data, "build_suggestions", discover)
+    runtime.next_refresh = float("inf")
+    runtime.next_suggestion_refresh = 0.0
+
+    runtime._run_due_work()
+
+    assert runtime.suggestions_in_flight is True
+    runtime.handle({"jsonrpc": "2.0", "id": 7, "method": "linear.refresh"})
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert messages[-1] == {"jsonrpc": "2.0", "id": 7, "result": {"accepted": True}}
+    release.set()
+
+
 def test_disabled_suggestion_source_does_not_query_linear(monkeypatch) -> None:
     output = io.StringIO()
     runtime = Runtime(stdout=output)
@@ -297,7 +352,7 @@ def test_disabled_suggestion_source_does_not_query_linear(monkeypatch) -> None:
     runtime.inbox.put({"id": 100, "result": {"sources": [{"criterion": "assigned_up_next", "enabled": False}]}})
     runtime.inbox.put({"id": 101, "result": {"ok": True, "accepted": 0, "dropped": 0}})
     monkeypatch.setattr(worker.suggestion_data, "build_suggestions", lambda _: pytest.fail("queried disabled source"))
-    runtime.refresh_suggestions()
+    runtime._start_suggestion_refresh()
     messages = [json.loads(line) for line in output.getvalue().splitlines()]
     assert messages[-1]["params"] == {"items": []}
 
@@ -307,9 +362,13 @@ def test_host_rejection_reports_error_without_publishing_an_empty_replacement(mo
     runtime = Runtime(stdout=output)
     monkeypatch.setattr(worker, "_ids", itertools.count(100))
     runtime.inbox.put({"id": 100, "result": {"sources": [{"criterion": "assigned_up_next", "enabled": True}]}})
-    runtime.inbox.put({"id": 101, "error": {"code": -32602, "message": "invalid"}})
     monkeypatch.setattr(worker.suggestion_data, "build_suggestions", lambda _: [{"id": "one"}])
-    runtime.refresh_suggestions()
+    runtime._start_suggestion_refresh()
+    outcome = runtime.inbox.get(timeout=5)
+    # The host rejects suggestions.set, which must not be replaced by an empty queue.
+    runtime.inbox.put({"id": 101, "error": {"code": -32602, "message": "invalid"}})
+    runtime.handle(outcome)
+    runtime._flush_suggestions()
     messages = [json.loads(line) for line in output.getvalue().splitlines()]
     assert [message["method"] for message in messages] == [
         "suggestions.sources",
@@ -323,9 +382,10 @@ def test_suggestion_refresh_uses_host_interval_independently(monkeypatch) -> Non
     runtime = Runtime(stdout=io.StringIO())
     runtime.handle({"method": "suggestions.refresh", "params": {"refresh_minutes": 30}})
     assert runtime.suggestion_refresh_due
-    monkeypatch.setattr(runtime, "refresh_suggestions", lambda: None)
+    monkeypatch.setattr(runtime, "_suggestion_enabled", lambda: False)
+    monkeypatch.setattr(runtime, "_publish_suggestion_items", lambda _items: None)
     monkeypatch.setattr(worker.time, "monotonic", lambda: 100)
-    runtime._scheduled_suggestions()
+    runtime._start_suggestion_refresh()
     assert runtime.next_suggestion_refresh == 1900
     assert not runtime.suggestion_refresh_due
 
@@ -342,7 +402,9 @@ def test_suggestions_failure_notifies_without_empty_snapshot(monkeypatch) -> Non
         runtime, "call_host", lambda *_: {"sources": [{"criterion": "assigned_up_next", "enabled": True}]}
     )
     monkeypatch.setattr(worker.suggestion_data, "build_suggestions", fail)
-    runtime.refresh_suggestions()
+    runtime._start_suggestion_refresh()
+    runtime.handle(runtime.inbox.get(timeout=5))
+    runtime._flush_suggestions()
     message = json.loads(output.getvalue())
     assert message["method"] == "suggestions.error"
     assert message["params"] == {"message": "Linear unavailable"}
@@ -468,7 +530,9 @@ def test_unexpected_suggestion_failure_preserves_queue_and_refreshes_session_sur
     last_good_queue = [{"id": "keep"}]
     host_queue = last_good_queue
 
-    runtime._scheduled_suggestions()
+    runtime._start_suggestion_refresh()
+    runtime.handle(runtime.inbox.get(timeout=5))
+    runtime._flush_suggestions()
     runtime._scheduled_refresh()
 
     messages = [json.loads(line) for line in output.getvalue().splitlines()]

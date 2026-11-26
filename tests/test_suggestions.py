@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
-from aoe_linear_plugin.errors import LinearGraphQLError
-from aoe_linear_plugin.suggestions import discover_suggestions
+from aoe_linear_plugin import suggestions as suggestion_data
+from aoe_linear_plugin.client import LinearClient
+from aoe_linear_plugin.errors import LinearGraphQLError, LinearRateLimitError
+from aoe_linear_plugin.suggestions import build_suggestions, discover_suggestions
 
 
 class Client:
@@ -36,6 +39,29 @@ def issue(identifier="ENG-1", *, state="Up Next", assignee="viewer-1", team="ENG
 
 def page(nodes, *, has_next=False, cursor=None):
     return {"issues": {"nodes": nodes, "pageInfo": {"hasNextPage": has_next, "endCursor": cursor}}}
+
+
+def test_suggestion_polling_stops_after_a_rate_limit_until_the_reset(monkeypatch) -> None:
+    monkeypatch.setenv("LINEAR_API_KEY", "token")
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(429, headers={"Retry-After": "30"})
+
+    monkeypatch.setattr(
+        suggestion_data,
+        "LinearClient",
+        lambda token: LinearClient(token, transport=httpx.MockTransport(respond)),
+    )
+
+    with pytest.raises(LinearRateLimitError):
+        build_suggestions()
+    with pytest.raises(LinearRateLimitError) as error:
+        build_suggestions()
+
+    assert len(requests) == 1
+    assert 0 < error.value.retry_after <= 30
 
 
 def test_discovery_exposes_mapping_key_and_template_variables_without_embedding_source_text():
