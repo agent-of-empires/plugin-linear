@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.2.0](https://github.com/agent-of-empires/plugin-linear/compare/v0.1.1...v0.2.0) (2026-11-26)
+
+
+### Features
+
+* **api:** add authenticated Linear GraphQL lookup ([#8](https://github.com/agent-of-empires/plugin-linear/issues/8)) ([4dd6642](https://github.com/agent-of-empires/plugin-linear/commit/4dd6642fd2c8b08c6a80779cf09696446073c81e))
+* **commands:** add Linear status and open handlers ([#10](https://github.com/agent-of-empires/plugin-linear/issues/10)) ([a5bb0eb](https://github.com/agent-of-empires/plugin-linear/commit/a5bb0eb53f8651419d0f3d814c6ea9cf227f2494))
+* **kanban:** publish Linear workflow and priority facets ([#20](https://github.com/agent-of-empires/plugin-linear/issues/20)) ([9805bcc](https://github.com/agent-of-empires/plugin-linear/commit/9805bccc9fc2cde89a7a7d26391bb0f74243f423))
+* **linear:** make snoozed session row status opt-in ([#29](https://github.com/agent-of-empires/plugin-linear/issues/29)) ([3971503](https://github.com/agent-of-empires/plugin-linear/commit/39715033481877e24a5268b5a2ba4a713e9eca58))
+* **linear:** resolve issues from commit and pull request text ([#32](https://github.com/agent-of-empires/plugin-linear/issues/32)) ([4248a98](https://github.com/agent-of-empires/plugin-linear/commit/4248a9863969a3a6c72ff61073a52e5ea5b0375b))
+* **refresh:** cache Linear issues and honor rate limits ([#11](https://github.com/agent-of-empires/plugin-linear/issues/11)) ([c665621](https://github.com/agent-of-empires/plugin-linear/commit/c665621cc7353d3180198daa5719b9739411d0da))
+* **resolution:** discover issues across checkouts ([#9](https://github.com/agent-of-empires/plugin-linear/issues/9)) ([30a5b69](https://github.com/agent-of-empires/plugin-linear/commit/30a5b69174e4e299236762e24398aac7ddee920a))
+* **row:** show one status glyph instead of the issue identifier ([#30](https://github.com/agent-of-empires/plugin-linear/issues/30)) ([f2d27a2](https://github.com/agent-of-empires/plugin-linear/commit/f2d27a27cbbbc9c8e09686e082e19fe816490886))
+* **ui:** show Linear issues in sessions ([#12](https://github.com/agent-of-empires/plugin-linear/issues/12)) ([ca79aff](https://github.com/agent-of-empires/plugin-linear/commit/ca79affc257b09e9c384e8614605f5ac030c3109))
+* **worker:** connect Linear plugin to AoE host ([#13](https://github.com/agent-of-empires/plugin-linear/issues/13)) ([9f1eff2](https://github.com/agent-of-empires/plugin-linear/commit/9f1eff279991cd741756e0d5cc4ad71a2935d328))
+
+
+### Bug Fixes
+
+* **auth:** read the token from a file when the environment has none ([#42](https://github.com/agent-of-empires/plugin-linear/issues/42)) ([acab384](https://github.com/agent-of-empires/plugin-linear/commit/acab38473a251a06665d0dd7b970143511c5accd))
+* **linear:** keep checkouts that do not use linear quiet ([#27](https://github.com/agent-of-empires/plugin-linear/issues/27)) ([e15503a](https://github.com/agent-of-empires/plugin-linear/commit/e15503a7813aa80af364312378202af6044936c9))
+* **linear:** report outages and stop misreading branch text ([#37](https://github.com/agent-of-empires/plugin-linear/issues/37)) ([98e4623](https://github.com/agent-of-empires/plugin-linear/commit/98e46230560d9bbfb2b9628bf4ff24efb7c3523b))
+* **plugin:** add supported AoE manifest and worker ([a058d71](https://github.com/agent-of-empires/plugin-linear/commit/a058d7190fc7a96630885e7bff95703a603ee3f5))
+* **ui:** render row status by workflow state, not priority ([#28](https://github.com/agent-of-empires/plugin-linear/issues/28)) ([2c480c0](https://github.com/agent-of-empires/plugin-linear/commit/2c480c065c088d10b8f908f4d4e821e776ef2ced))
+* **worker:** contain unexpected dispatch errors ([713cca1](https://github.com/agent-of-empires/plugin-linear/commit/713cca13625ac72663a254aa5f01f787fbfefb8d))
+* **worker:** ignore malformed notifications ([8134039](https://github.com/agent-of-empires/plugin-linear/commit/8134039fae3b627ad2dfcbbff0b7971b4f87337d))
+* **worker:** validate JSON-RPC requests ([eca0705](https://github.com/agent-of-empires/plugin-linear/commit/eca0705e745580ba8775ebf4aaa3837dd54f9d4f))
+
 ## 0.1.1
 
 - Resolve the token from `~/.config/linear/api_key` (or `LINEAR_API_KEY_FILE`) when the environment has none, so a worker authenticates even when its daemon was started from an SSH session that could not read the Keychain; the key is re-read on every refresh, so replacing it needs no restart.
