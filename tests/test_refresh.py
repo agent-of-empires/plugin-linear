@@ -331,6 +331,33 @@ def test_suggestion_rate_limit_pauses_session_polling(monkeypatch, tmp_path: Pat
     assert snapshot["sessions"][0]["stale"] is True
 
 
+def test_refresh_stops_when_another_surface_arms_the_cooldown_mid_run(monkeypatch, tmp_path: Path) -> None:
+    """A run already paging stops instead of spending requests during a shared cooldown."""
+    first, second = tmp_path / "a", tmp_path / "b"
+    _checkout(first, "ENG-1")
+    _checkout(second, "ENG-2")
+    monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})
+    fetched: list[str] = []
+
+    def fetch(_client, branch, _hints):
+        fetched.append(branch)
+        # Suggestion polling hits the limit while this refresh is already under way.
+        client.note_rate_limit(30)
+        return [], None
+
+    monkeypatch.setattr(refresh, "_fetch_branch", fetch)
+
+    snapshot = refresh.build_snapshot(
+        [{"id": "s1", "project_path": str(first)}, {"id": "s2", "project_path": str(second)}],
+        env={"LINEAR_API_KEY": "token"},
+    )
+
+    assert fetched == ["ENG-1"]
+    assert snapshot["rate_limited"] is True
+    errors = [(session["repos"][0]["error"] or {}).get("kind") for session in snapshot["sessions"]]
+    assert errors == [None, "rate_limited"]
+
+
 def test_http_rate_limit_sets_retry_backoff(monkeypatch, tmp_path: Path) -> None:
     _checkout(tmp_path, "ENG-1")
     monkeypatch.setattr(refresh, "_state", {"snapshot": {"sessions": []}, "backoff_until": 0.0})

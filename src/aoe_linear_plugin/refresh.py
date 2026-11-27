@@ -73,8 +73,14 @@ def _fetch_branches(
         if group in fetched:
             issues, error = fetched[group]
         elif stop_error is None:
-            issues, error = _fetch_branch(client, target[1], list(group[1]))
-            fetched[group] = (issues, error)
+            remaining = rate_limit_cooldown()
+            if remaining > 0:
+                # Suggestion polling shares this credential and hit the limit while this run was
+                # already paging, so the remaining checkouts must not spend rejected requests.
+                issues, error = [], {"kind": "rate_limited", "hint": RATE_HINT, "retry_after": remaining}
+            else:
+                issues, error = _fetch_branch(client, target[1], list(group[1]))
+                fetched[group] = (issues, error)
         else:
             issues, error = [], stop_error
         issues_by_target[target] = issues
