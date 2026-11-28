@@ -1,27 +1,35 @@
 id = "agent-of-empires.linear"
 name = "Linear"
 version = "0.2.0"
-api_version = 23
-aoe_version = ">=1.26.0, <2.0.0"
+api_version = 27
+aoe_version = ">=1.27.0, <2.0.0"
 description = "Linear issue status and assigned-issue suggestions for Agent of Empires sessions, resolving issues from branches, commits, and pull requests."
 icon = "circle-dot"
 icon_asset = "assets/linear-icon.png"
 capabilities = ["runtime.worker", "net", "session.read", "process.spawn", "fs.read", "browser_open"]
 
+# The CLI grafts these as `aoe linear status|refresh|open` (api_version 27).
+[[command_groups]]
+id = "linear"
+about = "Linear issue commands"
+
 [[commands]]
 id = "status"
 title = "Linear: status"
 description = "Show Linear issues linked to this checkout."
+group = "linear"
 
 [[commands]]
 id = "refresh"
 title = "Linear: refresh"
 description = "Refresh Linear issues for active sessions."
+group = "linear"
 
 [[commands]]
 id = "open"
 title = "Linear: open issue"
 description = "Open the selected Linear issue for this checkout."
+group = "linear"
 [commands.action]
 kind = "open-ui-link"
 slot = "row-badge"
