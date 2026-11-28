@@ -1,14 +1,14 @@
 id = "agent-of-empires.linear"
 name = "Linear"
 version = "0.2.0"
-api_version = 26
+api_version = 27
 aoe_version = ">=1.27.0, <2.0.0"
 description = "Resolve Linear issues linked to git branches, commits, and pull requests, and open their URLs."
 icon = "circle-dot"
 icon_asset = "assets/linear-icon.png"
 capabilities = ["runtime.worker", "net", "session.read", "process.spawn", "fs.read", "browser_open"]
 
-# The CLI grafts these as `aoe linear status|refresh|open` (api_version 26).
+# The CLI grafts these as `aoe linear status|refresh|open` (api_version 27).
 [[command_groups]]
 id = "linear"
 about = "Linear issue commands"

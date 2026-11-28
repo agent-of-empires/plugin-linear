@@ -42,7 +42,7 @@ The manifest uses the unverified community ID `agent-of-empires.linear`. `gh:age
 
 ## Commands
 
-The CLI exposes them as `aoe linear status`, `aoe linear refresh`, and `aoe linear open`; that nesting comes from the manifest's `[[command_groups]]` entry, which needs SDK API 26. The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.agent-of-empires.linear.status`, `plugin.agent-of-empires.linear.open`, and `plugin.agent-of-empires.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
+The CLI exposes them as `aoe linear status`, `aoe linear refresh`, and `aoe linear open`; that nesting comes from the manifest's `[[command_groups]]` entry, which needs SDK API 27. The worker handles `linear.status`, `linear.open`, and `linear.refresh` requests and `linear.select_issue` pane actions, and routes the `plugin.agent-of-empires.linear.status`, `plugin.agent-of-empires.linear.open`, and `plugin.agent-of-empires.linear.refresh` names to the same handlers. The `open` command is a host-side `open-ui-link` action for the selected issue; reader failures always signal worker shutdown, and poll failures log only the exception class, never potentially sensitive exception text.
 
 ### GitHub plugin feature mapping
 
