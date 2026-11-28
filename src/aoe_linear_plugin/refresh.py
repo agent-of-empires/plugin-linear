@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 
 from aoe_linear_plugin.auth import resolve_token
-from aoe_linear_plugin.client import LinearClient
+from aoe_linear_plugin.client import LinearClient, rate_limit_cooldown
 from aoe_linear_plugin.discovery import commit_messages, discover_checkouts, pull_request_hints
 from aoe_linear_plugin.errors import LinearError
 from aoe_linear_plugin.resolver import branch_is_linear, identifiers_in_text, resolve_branch
@@ -73,8 +73,14 @@ def _fetch_branches(
         if group in fetched:
             issues, error = fetched[group]
         elif stop_error is None:
-            issues, error = _fetch_branch(client, target[1], list(group[1]))
-            fetched[group] = (issues, error)
+            remaining = rate_limit_cooldown()
+            if remaining > 0:
+                # Suggestion polling shares this credential and hit the limit while this run was
+                # already paging, so the remaining checkouts must not spend rejected requests.
+                issues, error = [], {"kind": "rate_limited", "hint": RATE_HINT, "retry_after": remaining}
+            else:
+                issues, error = _fetch_branch(client, target[1], list(group[1]))
+                fetched[group] = (issues, error)
         else:
             issues, error = [], stop_error
         issues_by_target[target] = issues
@@ -138,7 +144,8 @@ def build_snapshot(
     """Fetch each checkout's branch once per distinct hint set and keep last-good issue data."""
     token = resolve_token(os.environ if env is None else env)
     with _lock:
-        if time.monotonic() < _state["backoff_until"]:
+        # The cooldown is shared with suggestion polling, so a limit either surface hit pauses both.
+        if time.monotonic() < _state["backoff_until"] or rate_limit_cooldown() > 0:
             return _stale_snapshot(_state["snapshot"], sessions, ignore_submodules=ignore_submodules)
         checkout_map = {
             session.get("id"): discover_checkouts(session, ignore_submodules=ignore_submodules) for session in sessions

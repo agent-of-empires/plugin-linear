@@ -12,13 +12,17 @@ import time
 from typing import Any
 
 from aoe_linear_plugin import refresh as refresh_data
+from aoe_linear_plugin import suggestions as suggestion_data
 from aoe_linear_plugin.errors import LinearError
 from aoe_linear_plugin.handlers import linear_open, linear_status
 from aoe_linear_plugin.uistate import PANE_SLOT, ROW_BADGE_SLOT, SELECT_METHOD, session_payloads
 
 DEFAULT_REFRESH_SECS = 120
+DEFAULT_SUGGESTION_REFRESH_SECS = 15 * 60
 RPC_TIMEOUT = 10.0
 SETTINGS_CHANGED = "plugin.settings.changed"
+# Internal wake-up the suggestion thread queues on the inbox; the host never sends it.
+SUGGESTIONS_DONE = "linear.suggestions.done"
 EOF = object()
 _ids = itertools.count(1_000_000)
 
@@ -63,11 +67,19 @@ class Runtime:
         self.interval = DEFAULT_REFRESH_SECS
         self.ignore_submodules = True
         self.show_priority = True
+        self.suggestion_settings: dict[str, Any] = {}
         self.use_pull_requests = True
         self.include_snoozed = False
         self.next_refresh = 0.0
+        self.suggestion_interval = DEFAULT_SUGGESTION_REFRESH_SECS
+        self.next_suggestion_refresh = 0.0
+        self.suggestion_refresh_due = False
         self.refresh_due = False
         self.configure_due = False
+        self.suggestions_in_flight = False
+        self.suggestion_refresh_pending = False
+        self.suggestions_ready = False
+        self.suggestion_outcome: dict[str, Any] | None = None
 
     def send(self, message: dict[str, Any]) -> None:
         with self.lock:
@@ -134,6 +146,118 @@ class Runtime:
         self._remove_vanished(active)
         self.pushed = {sid for sid in active if isinstance(sid, str)}
 
+    def _suggestion_enabled(self) -> bool:
+        sources = self.call_host("suggestions.sources", {})
+        values = sources.get("sources") if isinstance(sources, dict) else None
+        if not isinstance(values, list):
+            raise LinearError("Could not read Linear suggestion source settings from AoE.")
+        matching = [
+            source
+            for source in values
+            if isinstance(source, dict) and source.get("criterion") == suggestion_data.CRITERION
+        ]
+        if len(matching) != 1 or not isinstance(matching[0].get("enabled"), bool):
+            raise LinearError("AoE returned invalid Linear suggestion source settings.")
+        return bool(matching[0]["enabled"])
+
+    def _publish_suggestions(self, items: list[dict[str, Any]]) -> None:
+        result = self.call_host("suggestions.set", {"items": items})
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            raise LinearError("AoE rejected the Linear suggestions snapshot.")
+
+    def _suggestion_error(self, message: str) -> None:
+        self.send(
+            {
+                "jsonrpc": "2.0",
+                "id": next(_ids),
+                "method": "suggestions.error",
+                "params": {"message": message.encode("utf-8")[:4096].decode("utf-8", errors="ignore")},
+            }
+        )
+
+    def _publish_suggestion_items(self, items: list[dict[str, Any]]) -> None:
+        try:
+            self._publish_suggestions(items)
+        except (LinearError, ValueError, TypeError) as exc:
+            self._suggestion_error(str(exc))
+        except Exception:  # noqa: BLE001  a rejected snapshot must not block session refresh.
+            self._suggestion_error("Linear suggestion refresh failed unexpectedly.")
+
+    def _start_suggestion_refresh(self) -> None:
+        """Page Linear on a worker thread so commands keep flowing during discovery.
+
+        Only the network work leaves the loop thread: ``call_host`` drains the inbox while it
+        waits for a reply, so two threads waiting on host RPCs would steal each other's
+        responses. The thread hands its outcome back through the inbox instead.
+        """
+        self.suggestion_refresh_due = False
+        if self.suggestions_in_flight:
+            # Discovery already covers this request; republish as soon as it reports back.
+            self.suggestion_refresh_pending = True
+            return
+        self.next_suggestion_refresh = time.monotonic() + self.suggestion_interval
+        try:
+            if not self._suggestion_enabled():
+                self._publish_suggestion_items([])
+                return
+            settings = dict(self.suggestion_settings)
+            self.suggestions_in_flight = True
+            threading.Thread(
+                target=self._discover_suggestions,
+                args=(settings,),
+                name="linear-suggestions",
+                daemon=True,
+            ).start()
+        except (LinearError, ValueError, TypeError) as exc:
+            self.suggestions_in_flight = False
+            self._suggestion_error(str(exc))
+        except Exception:  # noqa: BLE001  suggestion failures must not block session refresh.
+            self.suggestions_in_flight = False
+            sys.stderr.write("Linear suggestion refresh failed unexpectedly.\n")
+            self._suggestion_error("Linear suggestion refresh failed unexpectedly.")
+
+    def _discover_suggestions(self, settings: dict[str, Any]) -> None:
+        """Run the paging requests off the loop thread and hand the outcome back."""
+        try:
+            outcome: dict[str, Any] = {"items": suggestion_data.build_suggestions(settings)}
+        except (LinearError, ValueError, TypeError) as exc:
+            outcome = {"message": str(exc)}
+        except Exception:  # noqa: BLE001  one discovery crash must not end the worker.
+            sys.stderr.write("Linear suggestion refresh failed unexpectedly.\n")
+            outcome = {"message": "Linear suggestion refresh failed unexpectedly."}
+        # The loop drops this result if the scope changed while it was paging.
+        outcome["settings"] = settings
+        self.inbox.put({"method": SUGGESTIONS_DONE, "params": outcome})
+
+    def _finish_suggestions(self, params: Any) -> None:
+        """Stage a discovery result; the loop publishes it so host RPCs stay unserialized."""
+        self.suggestions_in_flight = False
+        self.suggestion_outcome = params if isinstance(params, dict) else {}
+        self.suggestions_ready = True
+
+    def _flush_suggestions(self) -> None:
+        """Publish a complete successful snapshot, or report failure without clearing it."""
+        self.suggestions_ready = False
+        outcome = self.suggestion_outcome or {}
+        self.suggestion_outcome = None
+        if self.suggestion_refresh_pending:
+            self.suggestion_refresh_pending = False
+            self.suggestion_refresh_due = True
+        settings = outcome.get("settings")
+        if isinstance(settings, dict) and settings != self.suggestion_settings:
+            # Workflow states or scopes changed while this query was paging, so the snapshot
+            # describes a superseded queue: keep the last-good one and refetch instead.
+            self.suggestion_refresh_due = True
+            return
+        items = outcome.get("items")
+        if isinstance(items, list):
+            self._publish_suggestion_items(items)
+            return
+        message = outcome.get("message")
+        self._suggestion_error(
+            message if isinstance(message, str) and message else "Linear suggestion refresh failed unexpectedly."
+        )
+
     def _remove_vanished(self, active: set[Any]) -> None:
         for sid in self.pushed - active:
             for slot, slot_id in (ROW_BADGE_SLOT, PANE_SLOT):
@@ -186,18 +310,34 @@ class Runtime:
                 self.selected[sid] = identifier
                 self._push()
 
+    def _request_suggestion_refresh(self, params: Any) -> None:
+        if isinstance(params, dict):
+            minutes = params.get("refresh_minutes")
+            if isinstance(minutes, int) and not isinstance(minutes, bool) and minutes in (5, 15, 30, 60, 120):
+                self.suggestion_interval = minutes * 60
+        self.suggestion_refresh_due = True
+
     def handle(self, message: dict[str, Any]) -> None:
         method = message.get("method")
         if not isinstance(method, str):
+            return
+        if method == SUGGESTIONS_DONE:
+            self._finish_suggestions(message.get("params"))
             return
         if method == SETTINGS_CHANGED:
             # The host notifies after a settings write; the outer loop re-reads config.get and
             # repaints, so a toggle such as include_snoozed applies without a worker restart.
             self.configure_due = True
             return
+        self._dispatch(method, message)
+
+    def _dispatch(self, method: str, message: dict[str, Any]) -> None:
         params = message.get("params") or {}
         msg_id = message.get("id")
         try:
+            if method == "suggestions.refresh":
+                self._request_suggestion_refresh(params)
+                return
             result = self._command_result(method, params)
             self._after_command(method, params)
         except UnknownMethodError:
@@ -231,6 +371,15 @@ class Runtime:
         self._configure_boolean("show_priority")
         self._configure_boolean("use_pull_requests")
         self._configure_boolean("include_snoozed")
+        for key in (
+            "suggestion_up_next_states",
+            "suggestion_team_scope",
+            "suggestion_project_scope",
+        ):
+            result = self.call_host("config.get", {"key": key})
+            value = result.get("value") if isinstance(result, dict) else None
+            if isinstance(value, str):
+                self.suggestion_settings[key] = value
 
     def _configure_boolean(self, key: str) -> None:
         result = self.call_host("config.get", {"key": key})
@@ -243,6 +392,9 @@ class Runtime:
         self.configure_due = False
         self._configure()
         self.refresh_due = True
+        # Suggestion scope and workflow states are settings too; republish the queue now
+        # instead of leaving the old scope visible until the next suggestion deadline.
+        self.suggestion_refresh_due = True
 
     def _scheduled_refresh(self) -> None:
         self.refresh_due = False
@@ -253,17 +405,35 @@ class Runtime:
         finally:
             self.next_refresh = time.monotonic() + self.interval if self.interval else float("inf")
 
+    def _work_pending(self) -> bool:
+        """Whether work queued outside the loop still has to run before waiting."""
+        return self.configure_due or self.refresh_due or self.suggestion_refresh_due or self.suggestions_ready
+
+    def _run_due_work(self) -> None:
+        """Run the settings reload, pending publish, and refreshes that are due."""
+        if self.configure_due:
+            self._apply_settings_change()
+        if self.suggestions_ready:
+            self._flush_suggestions()
+        if self.refresh_due or time.monotonic() >= self.next_refresh:
+            self._scheduled_refresh()
+        if not self.stopped and (self.suggestion_refresh_due or time.monotonic() >= self.next_suggestion_refresh):
+            self._start_suggestion_refresh()
+
     def run(self) -> None:
         threading.Thread(target=self._read, daemon=True).start()
         self._configure()
         while not self.stopped:
-            if self.configure_due:
-                self._apply_settings_change()
-            if self.refresh_due or time.monotonic() >= self.next_refresh:
-                self._scheduled_refresh()
+            self._run_due_work()
             if self.stopped:
                 break
-            timeout = max(0.0, self.next_refresh - time.monotonic()) if self.interval else None
+            if self._work_pending():
+                # Host RPCs above dispatch messages from the inbox, so a refresh request or a
+                # settings change can arrive mid-refresh. Run it now instead of sleeping until
+                # the next deadline, which can be hours away.
+                continue
+            deadline = min(self.next_refresh, self.next_suggestion_refresh)
+            timeout = max(0.0, deadline - time.monotonic())
             try:
                 item = self.inbox.get(timeout=timeout)
             except queue.Empty:
