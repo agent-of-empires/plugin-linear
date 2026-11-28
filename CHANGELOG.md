@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/agent-of-empires/plugin-linear/compare/v0.2.0...v0.3.0) (2026-11-28)
+
+
+### Features
+
+* **manifest:** nest commands under a linear command group ([#46](https://github.com/agent-of-empires/plugin-linear/issues/46)) ([15eddb0](https://github.com/agent-of-empires/plugin-linear/commit/15eddb0eb20cf1aac5ec7d2523f58dcf5f8db6f0))
+
+
+### Bug Fixes
+
+* **manifest:** declare api_version 27 for the linear command group ([#48](https://github.com/agent-of-empires/plugin-linear/issues/48)) ([673f495](https://github.com/agent-of-empires/plugin-linear/commit/673f495d2ab2b8e13ae1b574015a5cc8b41f95a7))
+
 ## [0.2.0](https://github.com/agent-of-empires/plugin-linear/compare/v0.1.1...v0.2.0) (2026-11-26)
 
 

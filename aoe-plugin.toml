@@ -1,6 +1,6 @@
 id = "agent-of-empires.linear"
 name = "Linear"
-version = "0.2.0"
+version = "0.3.0"
 api_version = 27
 aoe_version = ">=1.27.0, <2.0.0"
 description = "Resolve Linear issues linked to git branches, commits, and pull requests, and open their URLs."
